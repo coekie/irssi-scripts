@@ -18,7 +18,7 @@ $VERSION = '0.6.1+1';
 	description 	=> 'execute a command or replace text, triggered by a message,notice,join,part,quit,kick,topic or invite',
 	license 	=> 'GPLv2',
 	url     	=> 'http://wouter.coekaerts.be/irssi/',
-	changed  	=> '16/11/04',
+	changed  	=> '23/11/04',
 );
 
 my @triggers;
@@ -30,13 +30,14 @@ TRIGGER DELETE <number>|<regexp>
 TRIGGER LIST
 TRIGGER SAVE 
 TRIGGER RELOAD
-TRIGGER ADD %|[-<types>] [-regexp <regexp>] [-nocase] [-channels <channels>] [-masks <masks>] [-hasmode <hasmode>] [-hasflag <hasflag>]
+TRIGGER ADD %|[-<types>] [-pattern <pattern>|-regexp <regexp>] [-nocase] [-tags <tags>] [-channels <channels>] [-masks <masks>] [-hasmode <hasmode>] [-hasflag <hasflag>]
             [-command <command>] [-replace <replace>] [-once] [-stop]
 
 When to match:
      -<types>: Trigger on these types of messages. The different types are:
                  publics,privmsgs,pubactions,privactions,pubnotices,privnotices,joins,parts,quits,kicks,topics,invites
                  -all is an alias for all of them.
+     -pattern: The message must match <pattern>. ? and * can be used as wildcards
      -regexp: The message must match <regexp>. (see man 7 regex or man perlretut)
      -nocase: Match the regexp case insensitive
      -tags: Only trigger on server with tag in <tags>. A space-delimited list.
@@ -103,7 +104,7 @@ my @trigger_all_switches = ('publics','privmsgs','pubactions','privactions','pub
 my @trigger_switches = @trigger_all_switches;
 push @trigger_switches, 'nocase', 'stop','once';
 #parameters (with an argument)
-my @trigger_params = ('masks','channels','tags','regexp','command','replace','hasmode','hasflag');
+my @trigger_params = ('masks','channels','tags','pattern','regexp','command','replace','hasmode','hasflag');
 #list of all options (including switches)
 my @trigger_options = ('all');
 push @trigger_options, @trigger_switches;
@@ -223,7 +224,7 @@ sub check_signal_message {
 		}
 		
 		# check regexp (and keep matches in @- and @+, so don't make a this a {block})
-		next if ($trigger->{'regexp'} && ($parammessage == -1 || $message !~ m/$trigger->{'compiled'}/));
+		next if ($trigger->{'compregexp'} && ($parammessage == -1 || $message !~ m/$trigger->{'compregexp'}/));
 		
 		# if we got this far, it fully matched, and we need to do the replace/command/stop/once
 		my $expands = {
@@ -239,7 +240,7 @@ sub check_signal_message {
 		};
 
 		if (defined($trigger->{'replace'})) { # it's a -replace
-			$message =~ s/$trigger->{'compiled'}/do_expands($trigger->{'replace'},$expands,$message)/ge;
+			$message =~ s/$trigger->{'compregexp'}/do_expands($trigger->{'replace'},$expands,$message)/ge;
 			$changed = 1;
 		}
 		
@@ -389,17 +390,33 @@ sub sig_command_script_unload {
 	}
 }
 
+my %mask_to_regexp = ();
+foreach my $i (0..255) {
+    my $ch = chr $i;
+    $mask_to_regexp{$ch} = "\Q$ch\E";
+}
+$mask_to_regexp{'?'} = '(.)';
+$mask_to_regexp{'*'} = '(.*)';
+
 sub compile_trigger {
 	my ($trigger) = @_;
-	$trigger->{'compiled'} = (defined $trigger->{'regexp'} ?
-		($trigger->{'nocase'} ?
-			qr/(?i)$trigger->{'regexp'}/
-		:
-			qr/$trigger->{'regexp'}/
-		)
-	:
-		undef
-	);
+	my $regexp;
+	
+	if ($trigger->{'regexp'}) {
+		$regexp = $trigger->{'regexp'};
+	} elsif ($trigger->{'pattern'}) {
+		$regexp = $trigger->{'pattern'};
+		$regexp =~ s/(.)/$mask_to_regexp{$1}/g;
+	} else {
+		delete $trigger->{'compregexp'};
+		return;
+	}
+	
+	if ($trigger->{'nocase'}) {
+		$regexp = '(?i)' . $regexp;
+	}
+	
+	$trigger->{'compregexp'} = qr/$regexp/;
 }
 
 # TRIGGER LOAD
@@ -595,6 +612,11 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 	
 	if (defined($trigger->{'replace'}) && ! $trigger->{'regexp'}) {
 		Irssi::print("Error: Can't have -replace without -regexp");
+		return undef;
+	}
+
+	if ($trigger->{'pattern'} && $trigger->{'regexp'}) {
+		Irssi::print("Error: Can't have -pattern and -regexp in same trigger");
 		return undef;
 	}
 
