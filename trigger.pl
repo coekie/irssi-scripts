@@ -39,8 +39,10 @@ When to match:
                  -all is an alias for all of them.
      -regexp: The message must match <regexp>. (see man 7 regex or man perlretut)
      -nocase: Match the regexp case insensitive
-     -channels: Only trigger in <channels>. a space-delimited list. (use quotes)
+     -tags: Only trigger on server with tag in <tags>. A space-delimited list.
+     -channels: Only trigger in <channels>. A space-delimited list. (use quotes)
                 Examples: '#chan1 #chan2' or 'IRCNet/#channel'
+                          -channels 'EFNet/' means every channel on EFNet and is the same as -tags 'EFNet'
      -masks: Only for messages from someone mathing one of the <masks> (space seperated)
      -hasmode: Only if the person who triggers it has the <hasmode>
                 Examples: '-o' means not opped, '+ov' means opped OR voiced, '-o&-v' means not opped AND not voiced
@@ -101,7 +103,7 @@ my @trigger_all_switches = ('publics','privmsgs','pubactions','privactions','pub
 my @trigger_switches = @trigger_all_switches;
 push @trigger_switches, 'nocase', 'stop','once';
 #parameters (with an argument)
-my @trigger_params = ('masks','channels','regexp','command','replace','hasmode','hasflag');
+my @trigger_params = ('masks','channels','tags','regexp','command','replace','hasmode','hasflag');
 #list of all options (including switches)
 my @trigger_options = ('all');
 push @trigger_options, @trigger_switches;
@@ -150,7 +152,7 @@ signal_add_first("message invite" => sub {check_signal_message(\@_,-1,1,2,3,'inv
 #  set $param* to -1 if not present (only allowed for message and channel)
 sub check_signal_message {
 	my ($signal,$parammessage,$paramchannel,$paramnick,$paramaddress,$condition) = @_;
-	my ($trigger, $channel, $changed, $stopped, $context);
+	my ($trigger, $changed, $stopped, $context);
 	my $server = $signal->[0];
 	my $message = ($parammessage == -1) ? '' : $signal->[$parammessage];
 
@@ -159,12 +161,25 @@ sub check_signal_message {
 		if (!$trigger->{"$condition"}) {
 			next; # wrong type of message
 		}
+		if ($trigger->{'tags'}) { # check if the tag matches
+			my $matches = 0;
+			foreach my $tag (split(/ /,$trigger->{'tags'})) {
+				if (lc($server->{'tag'}) eq lc($tag)) {
+					$matches = 1;
+					last;
+				}
+			}
+			if (!$matches) {
+				next;
+			}
+		}
+	
 		if ($trigger->{'channels'}) { # check if the channel matches
 			if ($paramchannel == -1) {
 				next;
 			}
 			my $matches = 0;
-			foreach $channel (split(/ /,$trigger->{'channels'})) {
+			foreach my $channel (split(/ /,$trigger->{'channels'})) {
 				if (lc($signal->[$paramchannel]) eq lc($channel)
 				  || lc($server->{'tag'}.'/'.$signal->[$paramchannel]) eq lc($channel)
 				  || lc($server->{'tag'}.'/') eq lc($channel)) {
