@@ -8,10 +8,10 @@
 # - Added $\X so you can safely use /exec and /eval
 # - fixed -stop stopping too much
 # - no ugly eval anymore to do replaces. cleaner code and fixes some weird bugs with -replace
+# - changed -modifier i back to -nocase, and made all replaces /g
 
 # TODO
-# - s/(?g)a/b/ works in v5.6.1, but not in v5.8.4?
-# - replace with parammessage == -1 or without -regexp => don't allow such triggers in the first place (error on adding, convert on load)
+# - replace without regexp, or regexp with parammessage == -1 => don't allow such triggers in the first place (error on adding, convert on load)
 # - -replace \x02 
 
 use strict;
@@ -21,7 +21,7 @@ use IO::File;
 use Data::Dumper; 
 use vars qw($VERSION %IRSSI);
 
-$VERSION = '0.6.1+';
+$VERSION = '0.6.1+1';
 %IRSSI = (
 	authors  	=> 'Wouter Coekaerts',
 	contact  	=> 'wouter@coekaerts.be',
@@ -41,7 +41,7 @@ TRIGGER DELETE <number>|<regexp>
 TRIGGER LIST
 TRIGGER SAVE 
 TRIGGER RELOAD
-TRIGGER ADD %|[-<types>] [-regexp <regexp>] [-modifiers <modifiers>] [-channels <channels>] [-masks <masks>] [-hasmode <hasmode>] [-hasflag <hasflag>]
+TRIGGER ADD %|[-<types>] [-regexp <regexp>] [-nocase] [-channels <channels>] [-masks <masks>] [-hasmode <hasmode>] [-hasflag <hasflag>]
             [-command <command>] [-replace <replace>] [-once] [-stop]
 
 When to match:
@@ -49,9 +49,7 @@ When to match:
                  publics,privmsgs,pubactions,privactions,pubnotices,privnotices,joins,parts,quits,kicks,topics,invites
                  -all is an alias for all of them.
      -regexp: the message must match <regexp>. (see man 7 regex)
-     -modifiers: use <modifiers> for the regexp. The modifiers you may use are:
-                     i: Ignore case.
-                     g: Match as many times as possible.
+     -nocase: match the regexp case insensitive
      -channels: only trigger in <channels>. a space-delimited list. (use quotes)
                 examples: '#chan1 #chan2' or 'IRCNet/#channel'
      -masks: only for messages from someone mathing one of the <masks> (space seperated)
@@ -80,7 +78,7 @@ What to do when it matches:
      
 Examples:
  Knockout people who do a !list:
-   /TRIGGER ADD -publics -channels "#channel1 #channel2" -modifiers i -regexp ^!list -command "KN \$N This is not a warez channel!"
+   /TRIGGER ADD -publics -channels "#channel1 #channel2" -nocase -regexp ^!list -command "KN \$N This is not a warez channel!"
  React to !echo commands from people who are +o in your friends-script:
    /TRIGGER ADD -publics -regexp '^!echo (.*)' -hasflag '+o' -command 'say echo: \$1'
  Ignore all non-ops on #channel:
@@ -91,13 +89,13 @@ Examples:
 
 Examples with -replace:
  Replace every occurence of shit with sh*t, case insensitive:
-   /TRIGGER ADD -modifiers i -regexp shit -replace sh*t
+   /TRIGGER ADD -nocase -regexp shit -replace sh*t
  Strip all colorcodes from *!lamer\@*:
    /TRIGGER ADD -masks *!lamer\@* -regexp '\\x03\\d?\\d?(,\\d\\d?)?|\\x02|\\x1f|\\x16|\\x06' -replace ''
  Never let *!bot1\@foo.bar or *!bot2\@foo.bar hilight you
  (this works by cutting your nick in 2 different parts, 'myn' and 'ick' here)
  you don't need to understand the -replace argument, just trust that it works if the 2 parts separately don't hilight:
-   /TRIGGER ADD -masks '*!bot1\@foo.bar *!bot2\@foo.bar' -regexp '(myn)(ick)' -modifiers ig -replace '\$1\\x02\\x02\$2'
+   /TRIGGER ADD -masks '*!bot1\@foo.bar *!bot2\@foo.bar' -regexp '(myn)(ick)' -nocase -replace '\$1\\x02\\x02\$2'
  Avoid being hilighted by !top10 in eggdrops with stats.mod (but show your nick in bold):
    /TRIGGER ADD -publics -regexp '(Top.0\\(.*\\): 1.*)(my)(nick)' -replace '\$1\\x02\$2\\x02\\x02\$3\\x02'
  Convert a Windows-1252 Euro to an ISO-8859-15 Euro (same effect as euro.pl):
@@ -112,9 +110,9 @@ SCRIPTHELP_EOF
 my @trigger_all_switches = ('publics','privmsgs','pubactions','privactions','pubnotices','privnotices','joins','parts','quits','kicks','topics','invites');
 #list of all switches
 my @trigger_switches = @trigger_all_switches;
-push @trigger_switches, 'stop','once';
+push @trigger_switches, 'nocase', 'stop','once';
 #parameters (with an argument)
-my @trigger_params = ('masks','channels','modifiers','regexp','command','replace','hasmode','hasflag');
+my @trigger_params = ('masks','channels','regexp','command','replace','hasmode','hasflag');
 #list of all options (including switches)
 my @trigger_options = ('all');
 push @trigger_options, @trigger_switches;
@@ -237,7 +235,7 @@ sub check_signal_message {
 		};
 
 		if (defined($trigger->{'replace'})) { # it's a -replace
-			$message =~ s/$trigger->{'compiled'}/do_expands($trigger->{'replace'},$expands,$message)/e;
+			$message =~ s/$trigger->{'compiled'}/do_expands($trigger->{'replace'},$expands,$message)/ge;
 			$changed = 1;
 		}
 		
@@ -372,6 +370,7 @@ sub cmd_save {
 	if (defined $io) {
 		my $dumper = Data::Dumper->new([\@triggers]);
 		$dumper->Purity(1)->Deepcopy(1);
+		$io->print("#Triggers file version $VERSION\n");
 		$io->print($dumper->Dump);
 		$io->close;
 	}
@@ -389,10 +388,14 @@ sub sig_command_script_unload {
 sub compile_trigger {
 	my ($trigger) = @_;
 	$trigger->{'compiled'} = (defined $trigger->{'regexp'} ?
-			qr/(?$trigger->{'modifiers'})$trigger->{'regexp'}/
+		($trigger->{'nocase'} ?
+			qr/(?i)$trigger->{'regexp'}/
+		:
+			qr/$trigger->{'regexp'}/
+		)
 	:
 		undef
-		);
+	);
 }
 
 # TRIGGER LOAD
@@ -410,26 +413,45 @@ sub cmd_load {
 		no strict 'vars';
 		my $text;
 		$text .= $_ foreach ($io->getlines);
+		my $file_version = '';
+		if ($text =~ /^#Triggers file version (.*)\n/) {
+			$file_version = $1;
+		}
 		my $rep = eval "$text";
 		@triggers = @$rep if ref $rep;
 		
+		my $trigger_nr = 1;
 		foreach $trigger (@triggers) {
 			# compile regexp
 			compile_trigger($trigger);
 
-			# convert old names: notices => pubnotices, actions => pubactions
-			foreach $oldname ('notices','actions') {
-				if ($trigger->{$oldname}) {
-					delete $trigger->{$oldname};
-					$trigger->{'pub'.$oldname} = 1;
-					$converted = 1;
+			if ($file_version lt '0.6.1') {
+				# convert old names: notices => pubnotices, actions => pubactions
+				foreach $oldname ('notices','actions') {
+					if ($trigger->{$oldname}) {
+						delete $trigger->{$oldname};
+						$trigger->{'pub'.$oldname} = 1;
+						$converted = 1;
+					}
 				}
 			}
+			if ($file_version lt '0.6.1+1' && $trigger->{'modifiers'}) {
+				if ($trigger->{'modifiers'} =~ /i/) {
+					$trigger->{'nocase'} = 1;
+					Irssi::print("Trigger: trigger $trigger_nr had 'i' in it's modifiers, it has been converted to -nocase");
+				}
+				if ($trigger->{'modifiers'} !~ /^[ig]*$/) {
+					Irssi::print("Trigger: trigger $trigger_nr had unrecognised modifier ' ". $trigger->{'modifiers'} ."', removed it.");
+				}
+				delete $trigger->{'modifiers'};
+				$converted = 1;
+			}
+			$trigger_nr++;
 		}
 	}
 	Irssi::print("Triggers loaded from ".$filename);
 	if ($converted) {
-		Irssi::print("Trigger: Converted old (confusing) params -notices and -actions to -pubnotices and pubactions.\nTriggers file will be in new format next time it's saved.");
+		Irssi::print("Trigger: Triggers file will be in new format next time it's saved.");
 	}
 }
 
