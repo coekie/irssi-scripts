@@ -674,6 +674,7 @@ Irssi::command_bind('nicklist scroll',\&cmd_scroll);
 Irssi::command_bind('nicklist fifo',\&cmd_fifo_start);
 Irssi::command_bind('nicklist screen',\&cmd_screen_start);
 Irssi::command_bind('nicklist screensize',\&screen_size);
+Irssi::command_bind('nicklist off',\&cmd_off);
 
 ##### signals #####
 Irssi::signal_add_last('window item changed', \&make_nicklist);
