@@ -26,10 +26,12 @@ my @triggers;
 sub cmd_help {
 	Irssi::print ( <<SCRIPTHELP_EOF
 
-TRIGGER DELETE <number>|<regexp>
 TRIGGER LIST
 TRIGGER SAVE 
 TRIGGER RELOAD
+TRIGGER MOVE <number> <number>
+TRIGGER DELETE <number>
+TRIGGER CHANGE <number> <options like in add>
 TRIGGER ADD %|[-<types>] [-pattern <pattern>|-regexp <regexp>] [-nocase] [-tags <tags>] [-channels <channels>] [-masks <masks>] [-hasmode <hasmode>] [-hasflag <hasflag>]
             [-command <command>] [-replace <replace>] [-once] [-stop]
 
@@ -518,20 +520,20 @@ sub to_string {
 # find a trigger (for REPLACE and DELETE), returns index of trigger, or -1 if not found
 sub find_trigger {
 	my ($data) = @_;
-	#my $index = $data-1;
 	if ($data =~ /^[0-9]*$/ and defined($triggers[$data-1])) {
 		return $data-1;
 	}
-	for (my $i=0;$i<scalar(@triggers);$i++) {
-		if ($triggers[$i]->{'regexp'} eq $data) {
-			return $i;
-		}
-	}
+	#for (my $i=0;$i<scalar(@triggers);$i++) {
+	#	if ($triggers[$i]->{'regexp'} eq $data) {
+	#		return $i;
+	#	}
+	#}
+	Irssi::print ("Trigger $data not found.");
 	return -1; # not found
 }
 
 
-# TRIGGER ADD
+# TRIGGER ADD <options>
 sub cmd_add {
 	my ($data, $server, $item) = @_;
 	my @args = &shellwords($data);
@@ -543,14 +545,12 @@ sub cmd_add {
 	}
 }
 
-# TRIGGER CHANGE <NR>|<regexp>
+# TRIGGER CHANGE <nr> <options>
 sub cmd_change {
 	my ($data, $server, $item) = @_;
 	my @args = &shellwords($data);
 	my $index = find_trigger(shift @args);
-	if ($index == -1) {
-		Irssi::print "Trigger not found.";
-	} else {
+	if ($index != -1) {
 		if(parse_options($triggers[$index],@args)) {
 			Irssi::print("Trigger " . ($index+1) ." changed to: ". to_string($triggers[$index]));
 		}
@@ -639,17 +639,33 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 	return $thetrigger;
 }
 
-# TRIGGER DELETE <num>|<regexp>
+# TRIGGER DELETE <num>
 sub cmd_del {
 	my ($data, $server, $item) = @_;
 	my @args = &shellwords($data);
-	my $index = find_trigger($data);
-	if ($index == -1) {
-		Irssi::print ("Trigger $data not found.");
-		return;
+	my $index = find_trigger(shift @args);
+	if ($index != -1) {
+		Irssi::print("Deleted ". ($index+1) .": ". to_string($triggers[$index]));
+		splice (@triggers,$index,1);
 	}
-	print("Deleted ". ($index+1) .": ". to_string($triggers[$index]));
-	splice (@triggers,$index,1);
+}
+
+# TRIGGER MOVE <num> <num>
+sub cmd_move {
+	my ($data, $server, $item) = @_;
+	my @args = &shellwords($data);
+	my $index = find_trigger(shift @args);
+	if ($index != -1) {
+		my $newindex = shift @args;
+		if ($newindex < 1 || $newindex > scalar(@triggers)) {
+			Irssi::print("$newindex is not a valid trigger number");
+			return;
+		}
+		Irssi::print("Moved from ". ($index+1) ." to $newindex: ". to_string($triggers[$index]));
+		$newindex -= 1; # array starts counting from 0
+		my $trigger = splice (@triggers,$index,1); # remove from old place
+		splice (@triggers,$newindex,0,($trigger)); # insert at new place
+	}
 }
 
 # TRIGGER LIST
@@ -670,6 +686,7 @@ command_bind('trigger help',\&cmd_help);
 command_bind('help trigger',\&cmd_help);
 command_bind('trigger add',\&cmd_add);
 command_bind('trigger change',\&cmd_change);
+command_bind('trigger move',\&cmd_move);
 command_bind('trigger list',\&cmd_list);
 command_bind('trigger delete',\&cmd_del);
 command_bind('trigger save',\&cmd_save);
