@@ -393,7 +393,13 @@ sub check_signal_message {
 		}
 		
 		if ($trigger->{'once'}) {
-			splice (@triggers,$index,1);
+			# find this trigger in the real trigger list, and remove it
+			for (my $realindex=0;$realindex < scalar(@triggers);$realindex++) {
+				if ($triggers[$realindex] == $trigger) {
+					splice (@triggers,$realindex,1);
+					last;
+				}
+			}
 			$need_rebuild = 1;
 		}
 	}
