@@ -9,9 +9,11 @@
 # - fixed -stop stopping too much
 # - no ugly eval anymore to do replaces. cleaner code and fixes some weird bugs with -replace
 # - changed -modifier i back to -nocase, and made all replaces /g
+# - changed "/TRIGGER REPLACE" to "/TRIGGER CHANGE" and fixed error handling
+# - prevent triggers with -replace without -regexp
+# - -regexp with signals without message (join, invite) never matches
 
 # TODO
-# - replace without regexp, or regexp with parammessage == -1 => don't allow such triggers in the first place (error on adding, convert on load)
 # - -replace \x02 
 
 use strict;
@@ -26,7 +28,7 @@ $VERSION = '0.6.1+1';
 	authors  	=> 'Wouter Coekaerts',
 	contact  	=> 'wouter@coekaerts.be',
 	name    	=> 'trigger',
-	description 	=> 'executes an irssi command or replace text, triggered by a message,notice,join,part,quit,kick,topic or invite',
+	description 	=> 'execute a command or replace text, triggered by a message,notice,join,part,quit,kick,topic or invite',
 	license 	=> 'GPLv2',
 	url     	=> 'http://wouter.coekaerts.be/irssi/',
 	changed  	=> '16/11/04',
@@ -219,7 +221,7 @@ sub check_signal_message {
 		}
 		
 		# check regexp (and keep matches in @- and @+, so don't make a this a {block})
-		next if ($trigger->{'regexp'} && $message !~ m/$trigger->{'compiled'}/);
+		next if ($trigger->{'regexp'} && ($parammessage == -1 || $message !~ m/$trigger->{'compiled'}/));
 		
 		# if we got this far, it fully matched, and we need to do the replace/command/stop/once
 		my $expands = {
@@ -380,7 +382,7 @@ sub cmd_save {
 # save on unload
 sub sig_command_script_unload {
 	my $script = shift;
-	if ($script =~ /(.*\/)?$IRSSI{'name'}(\.pl)?$/) {
+	if ($script =~ /(.*\/)?$IRSSI{'name'}(\.pl)? *$/) {
 		cmd_save();
 	}
 }
@@ -420,8 +422,9 @@ sub cmd_load {
 		my $rep = eval "$text";
 		@triggers = @$rep if ref $rep;
 		
-		my $trigger_nr = 1;
-		foreach $trigger (@triggers) {
+		for (my $index=0;$index < scalar(@triggers);$index++) { 
+			my $trigger = $triggers[$index];
+
 			# compile regexp
 			compile_trigger($trigger);
 
@@ -438,15 +441,20 @@ sub cmd_load {
 			if ($file_version lt '0.6.1+1' && $trigger->{'modifiers'}) {
 				if ($trigger->{'modifiers'} =~ /i/) {
 					$trigger->{'nocase'} = 1;
-					Irssi::print("Trigger: trigger $trigger_nr had 'i' in it's modifiers, it has been converted to -nocase");
+					Irssi::print("Trigger: trigger ".($index+1)." had 'i' in it's modifiers, it has been converted to -nocase");
 				}
 				if ($trigger->{'modifiers'} !~ /^[ig]*$/) {
-					Irssi::print("Trigger: trigger $trigger_nr had unrecognised modifier ' ". $trigger->{'modifiers'} ."', removed it.");
+					Irssi::print("Trigger: trigger ".($index+1)." had unrecognised modifier '". $trigger->{'modifiers'} ."', which couldn't be converted.");
 				}
 				delete $trigger->{'modifiers'};
 				$converted = 1;
 			}
-			$trigger_nr++;
+			
+			if (defined($trigger->{'replace'}) && ! $trigger->{'regexp'}) {
+				Irssi::print("Trigger: trigger ".($index+1)." had -replace but no -regexp, removed it");
+				splice (@triggers,$index,1);
+				$index--; # nr of next trigger now is the same as this one was
+			}
 		}
 	}
 	Irssi::print("Triggers loaded from ".$filename);
@@ -514,22 +522,26 @@ sub cmd_add {
 	}
 }
 
-# TRIGGER REPLACE <NR>|<regexp>
-sub cmd_replace {
+# TRIGGER CHANGE <NR>|<regexp>
+sub cmd_change {
 	my ($data, $server, $item) = @_;
 	my @args = &shellwords($data);
 	my $index = find_trigger(shift @args);
 	if ($index == -1) {
 		Irssi::print "Trigger not found.";
 	} else {
-		parse_options($triggers[$index],@args);
-		Irssi::print("Trigger " . ($index+1) ." changed to: ". to_string($triggers[$index]));
+		if(parse_options($triggers[$index],@args)) {
+			Irssi::print("Trigger " . ($index+1) ." changed to: ". to_string($triggers[$index]));
+		}
 	}	
 }
 
-# parses options to TRIGGER ADD and TRIGGER REPLACE
+# parses options for TRIGGER ADD and TRIGGER CHANGE
+# if invalid args returns undef, else changes $thetrigger and returns it
 sub parse_options {
-	my ($trigger,@args) = @_;
+	my ($thetrigger,@args) = @_;
+	my $trigger;
+	%$trigger = %$thetrigger; # make a copy to prevent changing the given trigger if args doesn't parse
 ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 		# -<param>
 		foreach my $param (@trigger_params) {
@@ -562,6 +574,11 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 		Irssi::print("Unknown option: $arg");
 		return undef;
 	}
+	
+	if (defined($trigger->{'replace'}) && ! $trigger->{'regexp'}) {
+		Irssi::print("Error: Can't have -replace without -regexp");
+		return undef;
+	}
 
 	# check if it has at least one type
 	my $has_a_type;
@@ -576,8 +593,8 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 	}
 	
 	compile_trigger($trigger);
-	
-	return $trigger;
+	%$thetrigger = %$trigger; # copy changes to real trigger
+	return $thetrigger;
 }
 
 # TRIGGER DELETE <num>|<regexp>
@@ -610,7 +627,7 @@ sub cmd_list {
 command_bind('trigger help',\&cmd_help);
 command_bind('help trigger',\&cmd_help);
 command_bind('trigger add',\&cmd_add);
-command_bind('trigger replace',\&cmd_replace);
+command_bind('trigger change',\&cmd_change);
 command_bind('trigger list',\&cmd_list);
 command_bind('trigger delete',\&cmd_del);
 command_bind('trigger save',\&cmd_save);
@@ -631,6 +648,7 @@ Irssi::signal_add('setup saved', 'cmd_save');
 
 # This makes tab completion work
 Irssi::command_set_options('trigger add',join(' ',@trigger_options));
+Irssi::command_set_options('trigger change',join(' ',@trigger_options));
 
 Irssi::settings_add_str($IRSSI{'name'}, 'trigger_file', Irssi::get_irssi_dir()."/triggers");
 
