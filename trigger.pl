@@ -45,7 +45,7 @@ When to match:
      -channels: Only trigger in <channels>. A space-delimited list. (use quotes)
                 Examples: '#chan1 #chan2' or 'IRCNet/#channel'
                           -channels 'EFNet/' means every channel on EFNet and is the same as -tags 'EFNet'
-     -masks: Only for messages from someone mathing one of the <masks> (space seperated)
+     -masks: Only for messages from someone matching one of the <masks> (space seperated)
      -hasmode: Only if the person who triggers it has the <hasmode>
                 Examples: '-o' means not opped, '+ov' means opped OR voiced, '-o&-v' means not opped AND not voiced
      -hasflag: Only works if friends.pl (friends_shasta.pl) or people.pl is loaded.
