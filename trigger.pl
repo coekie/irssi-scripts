@@ -10,6 +10,7 @@
 # - no ugly eval anymore to do replaces. cleaner code and fixes some weird bugs with -replace
 
 # TODO
+# - s/(?g)a/b/ works in v5.6.1, but not in v5.8.4?
 # - replace with parammessage == -1 or without -regexp => don't allow such triggers in the first place (error on adding, convert on load)
 # - -replace \x02 
 
@@ -41,7 +42,7 @@ TRIGGER LIST
 TRIGGER SAVE 
 TRIGGER RELOAD
 TRIGGER ADD %|[-<types>] [-regexp <regexp>] [-modifiers <modifiers>] [-channels <channels>] [-masks <masks>] [-hasmode <hasmode>] [-hasflag <hasflag>]
-            [-command <command>] [-replace <replace>] [-once]
+            [-command <command>] [-replace <replace>] [-once] [-stop]
 
 When to match:
      -<types>: Trigger on these types of messages. The different types are:
@@ -96,7 +97,7 @@ Examples with -replace:
  Never let *!bot1\@foo.bar or *!bot2\@foo.bar hilight you
  (this works by cutting your nick in 2 different parts, 'myn' and 'ick' here)
  you don't need to understand the -replace argument, just trust that it works if the 2 parts separately don't hilight:
-   /TRIGGER ADD -masks '*!bot1\@foo.bar *!bot2\@foo.bar' -regexp '(myn)(ick)' -replace '\$1\\x02\\x02\$2'
+   /TRIGGER ADD -masks '*!bot1\@foo.bar *!bot2\@foo.bar' -regexp '(myn)(ick)' -modifiers ig -replace '\$1\\x02\\x02\$2'
  Avoid being hilighted by !top10 in eggdrops with stats.mod (but show your nick in bold):
    /TRIGGER ADD -publics -regexp '(Top.0\\(.*\\): 1.*)(my)(nick)' -replace '\$1\\x02\$2\\x02\\x02\$3\\x02'
  Convert a Windows-1252 Euro to an ISO-8859-15 Euro (same effect as euro.pl):
@@ -219,45 +220,31 @@ sub check_signal_message {
 			}
 		}
 		
-		# check regexp (and keep matches in @vars)
-		my @vars;
-		if ($trigger->{'regexp'}) {
-			@vars = ($message =~ m/$trigger->{'compiled'}/);
-			if (! @vars) {  # doesn't match
-				next;
-			}
-		}
+		# check regexp (and keep matches in @- and @+, so don't make a this a {block})
+		next if ($trigger->{'regexp'} && $message !~ m/$trigger->{'compiled'}/);
 		
 		# if we got this far, it fully matched, and we need to do the replace/command/stop/once
-
 		my $expands = {
 			'M' => $message,
 			'T' => $server->{'tag'},
 			'C' => (($paramchannel == -1) ? '' : $signal->[$paramchannel]),
 			'N' => (($paramnick == -1) ? '' : $signal->[$paramnick]),
 			'A' => (($paramaddress == -1) ? '' : $signal->[$paramaddress]),
-			'I' => (($paramaddress == -1) ? '' : split(/\@/,$signal->[$paramaddress]),2)[0],
-			'H' => (($paramaddress == -1) ? '' : split(/\@/,$signal->[$paramaddress]),2)[1],
+			'I' => (($paramaddress == -1) ? '' : substr($signal->[$paramaddress],0,index($signal->[$paramaddress],'@'))),
+			'H' => (($paramaddress == -1) ? '' : substr($signal->[$paramaddress],index($signal->[$paramaddress],'@')+1)),
 			'$' => '$',
 			';' => "\x00"
 		};
 
 		if (defined($trigger->{'replace'})) { # it's a -replace
-			my $stuff_before = shift @vars; # the stuff before the part that matched
-			my $stuff_after = pop @vars;    # the stuff after it
-
-			my $replace = $trigger->{'replace'};
-			
-			# $1 = the stuff behind the $ we want to expand: a number, or a character from %expands
-			$replace =~ s/\$(\\*(\d+|[^0-9]))/expand(\@vars,$1,$expands)/ge;
-			$message = $stuff_before . $replace . $stuff_after;
+			$message =~ s/$trigger->{'compiled'}/do_expands($trigger->{'replace'},$expands,$message)/e;
 			$changed = 1;
 		}
 		
 		if ($trigger->{'command'}) { # it's a (nonempty) -command
 			my $command = $trigger->{'command'};
 			# $1 = the stuff behind the $ we want to expand: a number, or a character from %expands
-			$command =~ s/\$(\\*(\d+|[^0-9]))/expand(\@vars,$1,$expands)/ge;
+			$command = do_expands($command, $expands, $message);
 				
 			if ($paramchannel!=-1 && $server->channel_find($signal->[$paramchannel])) {
 				$context = $server->channel_find($signal->[$paramchannel]);
@@ -289,13 +276,27 @@ sub check_signal_message {
 	}
 }
 
-# used in check_signal_message, to expand $'s
+# used in check_signal_message to expand $'s
+# $inthis is a string that can contain $ stuff (like 'foo$1bar$N')
+sub do_expands {
+	my ($inthis, $expands,$from) = @_;
+	# @+ and @- are copied because there are two s/// nested, and the inner needs the $1 and $2,... of the outer one
+	my @plus = @+;
+	my @min = @-;
+	my $p = \@plus; my $m = \@min;
+	$inthis =~ s/\$(\\*(\d+|[^0-9]))/expand($1,$expands,$m,$p,$from)/ge;	
+	return $inthis;
+}
+
+# used in do_expands, to_expand is the part after the $
 sub expand {
-	my ($vars,$to_expand,$expands) = @_;
+	my ($to_expand,$expands,$min,$plus,$from) = @_;
 	if ($to_expand =~ /^\d+$/) { # a number => look up in $vars
-		return ($to_expand > @{$vars}) ? '' : $vars->[$to_expand-1];
+		# from man perlvar:
+		# $3 is the same as "substr $var, $-[3], $+[3] - $-[3])"
+		return ($to_expand > @{$min} ? '' : substr($from,$min->[$to_expand],$plus->[$to_expand]-$min->[$to_expand]));
 	} elsif ($to_expand =~ s/^\\//) { # begins with \, so strip that from to_expand
-		my $exp = expand($vars,$to_expand,$expands); # first expand without \
+		my $exp = expand($to_expand,$expands,$min,$plus,$from); # first expand without \
 		$exp =~ s/([^a-zA-Z0-9])/\\\1/g; # escape non-word chars
 		return $exp;
 	} else { # look up in $expands
@@ -388,13 +389,7 @@ sub sig_command_script_unload {
 sub compile_trigger {
 	my ($trigger) = @_;
 	$trigger->{'compiled'} = (defined $trigger->{'regexp'} ?
-		(defined($trigger->{'replace'}) ?
-			# replaces need the part before and after the matched part
-			qr/(?$trigger->{'modifiers'})^(.*?)$trigger->{'regexp'}(.*?)$/
-		:
-			# normal regexp, for -command only
 			qr/(?$trigger->{'modifiers'})$trigger->{'regexp'}/
-		)
 	:
 		undef
 		);
