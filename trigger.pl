@@ -1,19 +1,6 @@
 # Do /TRIGGER HELP for help
-#
-# Changelog 0.6.1+:
-# - fixed spaces in trigger rules output
-# - fixed saving settings with "/script unload trigger" by Valentin Batz (senneth)
-# - added -invites
-# - compile regexps only once
-# - Added $\X so you can safely use /exec and /eval
-# - fixed -stop stopping too much
-# - no ugly eval anymore to do replaces. cleaner code and fixes some weird bugs with -replace
-# - changed -modifier i back to -nocase, and made all replaces /g
-# - changed "/TRIGGER REPLACE" to "/TRIGGER CHANGE" and fixed error handling
-# - prevent triggers with -replace without -regexp
-# - -regexp with signals without message (join, invite) never matches
 
-# TODO
+# TODO (before releasable)
 # - -replace \x02 
 
 use strict;
@@ -540,18 +527,36 @@ sub cmd_change {
 # if invalid args returns undef, else changes $thetrigger and returns it
 sub parse_options {
 	my ($thetrigger,@args) = @_;
-	my $trigger;
+	my ($trigger, $option);
 	%$trigger = %$thetrigger; # make a copy to prevent changing the given trigger if args doesn't parse
 ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
-		# -<param>
+		# expand abbreviated options, put in $option
+		$arg =~ s/^-//;
+		$option = undef;
+		foreach my $ioption (@trigger_options) {
+			if (index($ioption, $arg) == 0) { # -$opt starts with $arg
+				if ($option) { # another already matched
+					Irssi::print("Ambiguous option: $arg");
+					return undef;
+				}
+				$option = $ioption;
+				last if ($arg eq $ioption); # exact match is unambiguous
+			}
+		}
+		if (!$option) {
+			Irssi::print("Unknown option: $arg");
+			return undef;
+		}
+
+		# -<param> <value>
 		foreach my $param (@trigger_params) {
-			if ($arg eq '-'.$param) {
+			if ($option eq $param) {
 				$trigger->{$param} = shift @args;
 				next ARGS;
 			}
 		}
 		# -all
-		if ($arg eq '-all') {
+		if ($option eq 'all') {
 			foreach my $switch (@trigger_all_switches) {
 				$trigger->{$switch} = 1;
 			}
@@ -561,18 +566,16 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 		# -[no]<switch>
 		foreach my $switch (@trigger_switches) {
 			# -<switch>
-			if ($arg eq '-'.$switch) {
+			if ($option eq $switch) {
 				$trigger->{$switch} = 1;
 				next ARGS;
 			}
 			# -no<switch>
-			elsif ($arg eq '-no'.$switch) {
+			elsif ($option eq 'no'.$switch) {
 				$trigger->{$switch} = undef;
 				next ARGS;
 			}
 		}
-		Irssi::print("Unknown option: $arg");
-		return undef;
 	}
 	
 	if (defined($trigger->{'replace'}) && ! $trigger->{'regexp'}) {
