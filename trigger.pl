@@ -694,7 +694,7 @@ sub find_trigger {
 # TRIGGER ADD <options>
 sub cmd_add {
 	my ($data, $server, $item) = @_;
-	my @args = &shellwords($data);
+	my @args = &shellwords($data . ' a');
 	
 	my $trigger = parse_options({},@args);
 	if ($trigger) {
@@ -707,7 +707,7 @@ sub cmd_add {
 # TRIGGER CHANGE <nr> <options>
 sub cmd_change {
 	my ($data, $server, $item) = @_;
-	my @args = &shellwords($data);
+	my @args = &shellwords($data . ' a');
 	my $index = find_trigger(shift @args);
 	if ($index != -1) {
 		if(parse_options($triggers[$index],@args)) {
@@ -722,6 +722,12 @@ sub cmd_change {
 sub parse_options {
 	my ($thetrigger,@args) = @_;
 	my ($trigger, $option);
+	
+	if (pop(@args) ne 'a') {
+		Irssi::print("Syntax error, probably missing a closing quote", MSGLEVEL_CLIENTERROR);
+		return undef;
+	}
+	
 	%$trigger = %$thetrigger; # make a copy to prevent changing the given trigger if args doesn't parse
 ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 		# expand abbreviated options, put in $option
@@ -730,7 +736,7 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 		foreach my $ioption (@trigger_options) {
 			if (index($ioption, $arg) == 0) { # -$opt starts with $arg
 				if ($option) { # another already matched
-					Irssi::print("Ambiguous option: $arg");
+					Irssi::print("Ambiguous option: $arg", MSGLEVEL_CLIENTERROR);
 					return undef;
 				}
 				$option = $ioption;
@@ -738,7 +744,7 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 			}
 		}
 		if (!$option) {
-			Irssi::print("Unknown option: $arg");
+			Irssi::print("Unknown option: $arg", MSGLEVEL_CLIENTERROR);
 			return undef;
 		}
 
