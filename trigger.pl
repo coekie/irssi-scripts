@@ -64,35 +64,37 @@ What to do when it matches:
                    \$I: His ident (foo)
                    \$H: His hostname (bar.com)
                    \$M: The complete message
+                \$\\X, with X being one of the above expands (e.g. \$\\M), escapes all non-alphanumeric characters, so it can be used with /eval or /exec. Don't use /eval or /exec without this, it's not safe.
 
      -replace: replaces the matching part with <replace> in your irssi (requires a <regexp>)
      -once: remove the trigger if it is triggered, so it only executes once and then is forgotten.
 
 Examples:
- knockout people who do a !list:
+ Knockout people who do a !list:
    /TRIGGER ADD -publics -channels "#channel1 #channel2" -modifiers i -regexp ^!list -command "KN \$N This is not a warez channel!"
- react to !echo commands from people who are +o in your friends-script:
-   /TRIGGER ADD -publics -regexp '^!echo (.*)' -hasflag '+o' -command 'say \$1'
- ignore all non-ops on #channel
+ React to !echo commands from people who are +o in your friends-script:
+   /TRIGGER ADD -publics -regexp '^!echo (.*)' -hasflag '+o' -command 'say echo: \$1'
+ Ignore all non-ops on #channel:
    /TRIGGER ADD -publics -channels "#channel" -hasmode '-o' -stop
+ Send a mail to yourself every time a topic is changed:
+   /TRIGGER ADD -topics -command 'exec echo $\N changed topic of $\C to: $\M | mail you\@somewhere.com -s topic'
+ 
 
 Examples with -replace:
- replace every occurence of shit with sh*t, case insensitive
+ Replace every occurence of shit with sh*t, case insensitive
    /TRIGGER ADD -modifiers i -regexp shit -replace sh*t
- strip all colorcodes from *!lamer\@*
+ Strip all colorcodes from *!lamer\@*:
    /TRIGGER ADD -masks *!lamer\@* -regexp '\\x03\\d?\\d?(,\\d\\d?)?|\\x02|\\x1f|\\x16|\\x06' -replace ''
- never let *!bot1\@foo.bar or *!bot2\@foo.bar hilight you
+ Never let *!bot1\@foo.bar or *!bot2\@foo.bar hilight you
  (this works by cutting your nick in 2 different parts, 'myn' and 'ick' here)
- you don't need to understand the -replace argument, just trust that it works if the 2 parts separately don't hilight.
+ you don't need to understand the -replace argument, just trust that it works if the 2 parts separately don't hilight:
    /TRIGGER ADD -masks '*!bot1\@foo.bar *!bot2\@foo.bar' -regexp '(myn)(ick)' -replace '\$1\\x02\\x02\$2'
- avoid being hilighted by !top10 in eggdrops with stats.mod (but show your nick in bold)
+ Avoid being hilighted by !top10 in eggdrops with stats.mod (but show your nick in bold):
    /TRIGGER ADD -publics -regexp '(Top.0\\(.*\\): 1.*)(my)(nick)' -replace '\$1\\x02\$2\\x02\\x02\$3\\x02'
- Convert a Windows-1252 Euro to an ISO-8859-15 Euro (same effect as euro.pl)
+ Convert a Windows-1252 Euro to an ISO-8859-15 Euro (same effect as euro.pl):
    /TRIGGER ADD -regexp '\\x80' -replace '\\xA4'
- Show tabs as spaces, not the inverted I (same effect as tab_stop.pl)
+ Show tabs as spaces, not the inverted I (same effect as tab_stop.pl):
    /TRIGGER ADD -regexp '\\t' -replace '    '
-
-WARNING: Be very careful when you use the 'eval' or 'exec' command with parameters that come from a remote user. Only use them if you understand the risk.
 SCRIPTHELP_EOF
    ,MSGLEVEL_CLIENTCRAP);
 } # /
@@ -234,7 +236,7 @@ TRIGGER:
 					';' => "\x00"
 				};
 				# $1 = the stuff behind the $ we want to expand: a number, or a character from %expands
-				$command =~ s/\$(\d+|[^0-9])/expand(\@vars,$1,$expands)/ge;
+				$command =~ s/\$(\\*(\d+|[^0-9]))/expand(\@vars,$1,$expands)/ge;
 				
 				
 				if ($paramchannel!=-1 && $server->channel_find($signal->[$paramchannel])) {
@@ -271,6 +273,10 @@ sub expand {
 	my ($vars,$to_expand,$expands) = @_;
 	if ($to_expand =~ /^\d+$/) { # a number => look up in $vars
 		return ($to_expand > @{$vars}) ? '' : $vars->[$to_expand-1];
+	} elsif ($to_expand =~ s/^\\//) { # begins with \, so strip that from to_expand
+		my $exp = expand($vars,$to_expand,$expands); # first expand without \
+		$exp =~ s/([^a-zA-Z0-9])/\\\1/g; # escape non-word chars
+		return $exp;
 	} else { # look up in $expands
 		return $expands->{$to_expand};
 	}
