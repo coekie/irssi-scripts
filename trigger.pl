@@ -107,7 +107,7 @@ my $recursion_depth = 0;
 my @trigger_all_switches = ('publics','privmsgs','pubactions','privactions','pubnotices','privnotices','joins','parts','quits','kicks','topics','invites');
 # all trigger types
 my @trigger_types = @trigger_all_switches;
-push @trigger_types, 'rawin', 'send_command', 'send_text', 'beep';
+push @trigger_types, 'rawin', 'send_command', 'send_text', 'beep', 'mode_channel';
 #list of all switches
 my @trigger_switches = @trigger_types;
 push @trigger_switches, 'nocase', 'stop','once';
@@ -235,6 +235,32 @@ my @signals = (
 	'types' => ['beep'],
 	'signal' => 'beep',
 	'sub' => sub {check_signal_message(\@_,-1,undef,undef,undef,undef,'beep');}
+},
+# "event "<cmd>, SERVER_REC, char *args, char *sender_nick, char *sender_address
+{
+	'types' => ['mode_channel'],
+	'signal' => 'event mode',
+	'sub' => sub {
+		my ($server, $args, $nickname, $address) = @_;
+		my ($target, $modes, $modeargs) = split(/ /, $args, 3);
+		return if (!$server->ischannel($target));
+		my (@modeargs) = split(/ /,$modeargs);
+		my ($pos, $type, $modearg) = (0, '+');
+		foreach my $char (split(//,$modes)) {
+			if ($char eq "+" || $char eq "-") {
+				$type = $char;
+			} elsif ($char =~ /[Oovh]/) { # mode_nick
+				$pos++;
+			} else {				
+				if ($char =~ /[beIqdk]/ || ( $char =~ /[lfJ]/ && $type eq '+')) {
+					$modearg = $modeargs[$pos++];
+				} else {
+					$modearg = undef;
+				}
+				check_signal_message(\@_,-1,$server,$target,$nickname,$address,'mode_channel',{ 'mode_type' => $type, 'mode_char' => $char, 'mode_arg' => $modearg});
+			}
+		}
+	}
 }
 );
 
@@ -258,7 +284,7 @@ sub sig_send_text_or_command {
 # set $parammessage to -1 if the signal doesn't have a message
 # for signal without channel, nick or address, set to undef
 sub check_signal_message {
-	my ($signal,$parammessage,$server,$channelname,$nickname,$address,$condition) = @_;
+	my ($signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
 	my ($trigger, $changed, $stopped, $context, $need_rebuild);
 	#my $server = $signal->[0];
 	my $message = ($parammessage == -1) ? '' : $signal->[$parammessage];
@@ -369,7 +395,6 @@ sub check_signal_message {
 			my $command = $trigger->{'command'};
 			# $1 = the stuff behind the $ we want to expand: a number, or a character from %expands
 			$command = do_expands($command, $expands, $message);
-			$command =~ s/\$/\$\$/;
 			
 			if (defined($server)) {
 				if (defined($channelname) && $server->channel_find($channelname)) {
@@ -424,11 +449,18 @@ sub do_expands {
 	my @plus = @+;
 	my @min = @-;
 	my $p = \@plus; my $m = \@min;
-	$inthis =~ s/\$(\\*(\d+|[^0-9x]|x[0-9a-fA-F][0-9a-fA-F]))/expand($1,$expands,$m,$p,$from)/ge;	
+	$inthis =~ s/\$(\\*(\d+|[^0-9x]|x[0-9a-fA-F][0-9a-fA-F]))/expand_and_escape($1,$expands,$m,$p,$from)/ge;	
 	return $inthis;
 }
 
-# used in do_expands, to_expand is the part after the $
+# \ $ and ; need extra escaping because we use eval
+sub expand_and_escape {
+	my $retval = expand(@_);
+	$retval =~ s/([\\\$;])/\\\1/g;
+	return $retval;
+}
+
+# used in do_expands (via expand_and_escape), to_expand is the part after the $
 sub expand {
 	my ($to_expand,$expands,$min,$plus,$from) = @_;
 	if ($to_expand =~ /^\d+$/) { # a number => look up in $vars
