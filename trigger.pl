@@ -4,6 +4,7 @@
 # - fixed spaces in trigger rules output
 # - fixed saving settings with "/script unload trigger" by Valentin Batz (senneth)
 # - added -invites
+# - precompiled regexps => faster + no ugly eval anymore to do replaces
 
 use strict;
 use Irssi 20020324 qw (command_bind command_runsub command signal_add_first signal_continue signal_stop);
@@ -20,7 +21,7 @@ $VERSION = '0.6.1+';
 	description 	=> 'executes an irssi command or replace text, triggered by a message,notice,join,part,quit,kick,topic or invite',
 	license 	=> 'GPLv2',
 	url     	=> 'http://wouter.coekaerts.be/irssi/',
-	changed  	=> '29/01/04',
+	changed  	=> '16/11/04',
 );
 
 my @triggers;
@@ -211,14 +212,13 @@ TRIGGER:
 		
 		# the only check left, is the regexp matching...
 		if (defined($trigger->{'replace'}) && $parammessage != -1) { # it's a -replace
-			# if you know a better way to do this, let me know:
-			eval('$matched = ($signal->[$parammessage] =~ s§'. $trigger->{'regexp'} . '§' . $trigger->{'replace'} . '§' . $trigger->{'modifiers'} . ');');
+			$matched = ($signal->[$parammessage] =~ s/$trigger->{'compiled'}/$trigger->{'replace'}/);
 			$changed = $changed || $matched;
 		}
 		if ($trigger->{'command'}) {
 			my @vars;
-			# check if the message matches the regexp (with the modifiers embedded), and put ($1,$2,$3,...) in @vars
-			@vars = $message =~ m/(?$trigger->{'modifiers'})$trigger->{'regexp'}/;
+			# check if the message matches the regexp, and put ($1,$2,$3,...) in @vars
+			@vars = ($message =~ m/$trigger->{'compiled'}/);
 			if (@vars){ # if it matched
 				$matched = 1;
 				my $command = $trigger->{'command'};
@@ -358,6 +358,15 @@ sub sig_command_script_unload {
 	}
 }
 
+sub compile_trigger {
+	my ($trigger) = @_;
+	$trigger->{'compiled'} = (defined $trigger->{'regexp'} ?
+		qr/(?$trigger->{'modifiers'})$trigger->{'regexp'}/
+	:
+		undef
+		);
+}
+
 # TRIGGER LOAD
 sub cmd_load {
 	my $converted = 0;
@@ -376,8 +385,11 @@ sub cmd_load {
 		my $rep = eval "$text";
 		@triggers = @$rep if ref $rep;
 		
-		# convert old names: notices => pubnotices, actions => pubactions
 		foreach $trigger (@triggers) {
+			# compile regexp
+			compile_trigger($trigger);
+
+			# convert old names: notices => pubnotices, actions => pubactions
 			foreach $oldname ('notices','actions') {
 				if ($trigger->{$oldname}) {
 					delete $trigger->{$oldname};
@@ -512,7 +524,9 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 	if (!$has_a_type) {
 		Irssi::print("Warning: this trigger doesn't trigger on any type of message. you probably want to add -publics or -all");
 	}
-
+	
+	compile_trigger($trigger);
+	
 	return $trigger;
 }
 
