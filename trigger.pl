@@ -4,7 +4,14 @@
 # - fixed spaces in trigger rules output
 # - fixed saving settings with "/script unload trigger" by Valentin Batz (senneth)
 # - added -invites
-# - precompiled regexps => faster + no ugly eval anymore to do replaces
+# - compile regexps only once
+# - Added $\X so you can safely use /exec and /eval
+# - fixed -stop stopping too much
+# - no ugly eval anymore to do replaces. cleaner code and fixes some weird bugs with -replace
+
+# TODO
+# - replace with parammessage == -1 or without -regexp => don't allow such triggers in the first place (error on adding, convert on load)
+# - -replace \x02 
 
 use strict;
 use Irssi 20020324 qw (command_bind command_runsub command signal_add_first signal_continue signal_stop);
@@ -68,7 +75,8 @@ What to do when it matches:
 
      -replace: replaces the matching part with <replace> in your irssi (requires a <regexp>)
      -once: remove the trigger if it is triggered, so it only executes once and then is forgotten.
-
+     -stop: stops the signal. It won't get displayed by Irssi. Like /IGNORE
+     
 Examples:
  Knockout people who do a !list:
    /TRIGGER ADD -publics -channels "#channel1 #channel2" -modifiers i -regexp ^!list -command "KN \$N This is not a warez channel!"
@@ -77,11 +85,11 @@ Examples:
  Ignore all non-ops on #channel:
    /TRIGGER ADD -publics -channels "#channel" -hasmode '-o' -stop
  Send a mail to yourself every time a topic is changed:
-   /TRIGGER ADD -topics -command 'exec echo $\N changed topic of $\C to: $\M | mail you\@somewhere.com -s topic'
+   /TRIGGER ADD -topics -command 'exec echo \$\\N changed topic of \$\\C to: \$\\M | mail you\@somewhere.com -s topic'
  
 
 Examples with -replace:
- Replace every occurence of shit with sh*t, case insensitive
+ Replace every occurence of shit with sh*t, case insensitive:
    /TRIGGER ADD -modifiers i -regexp shit -replace sh*t
  Strip all colorcodes from *!lamer\@*:
    /TRIGGER ADD -masks *!lamer\@* -regexp '\\x03\\d?\\d?(,\\d\\d?)?|\\x02|\\x1f|\\x16|\\x06' -replace ''
@@ -154,11 +162,10 @@ signal_add_first("message invite" => sub {check_signal_message(\@_,-1,1,2,3,'inv
 #  set $param* to -1 if not present (only allowed for message and channel)
 sub check_signal_message {
 	my ($signal,$parammessage,$paramchannel,$paramnick,$paramaddress,$condition) = @_;
-	my ($trigger, $channel, $matched, $changed, $context);
+	my ($trigger, $channel, $changed, $stopped, $context);
 	my $server = $signal->[0];
 	my $message = ($parammessage == -1) ? '' : $signal->[$parammessage];
 
-TRIGGER:
 	for (my $index=0;$index < scalar(@triggers);$index++) { 
 		my $trigger = $triggers[$index];
 		if (!$trigger->{"$condition"}) {
@@ -210,60 +217,74 @@ TRIGGER:
 			if (!check_modes($flags,$trigger->{'hasflag'})) {
 				next;
 			}
-		}	
+		}
 		
-		# the only check left, is the regexp matching...
-		if (defined($trigger->{'replace'}) && $parammessage != -1) { # it's a -replace
-			$matched = ($signal->[$parammessage] =~ s/$trigger->{'compiled'}/$trigger->{'replace'}/);
-			$changed = $changed || $matched;
-		}
-		if ($trigger->{'command'}) {
-			my @vars;
-			# check if the message matches the regexp, and put ($1,$2,$3,...) in @vars
+		# check regexp (and keep matches in @vars)
+		my @vars;
+		if ($trigger->{'regexp'}) {
 			@vars = ($message =~ m/$trigger->{'compiled'}/);
-			if (@vars){ # if it matched
-				$matched = 1;
-				my $command = $trigger->{'command'};
-				my $expands = {
-					'M' => $message,
-					'T' => $server->{'tag'},
-					'C' => (($paramchannel == -1) ? '' : $signal->[$paramchannel]),
-					'N' => (($paramnick == -1) ? '' : $signal->[$paramnick]),
-					'A' => (($paramaddress == -1) ? '' : $signal->[$paramaddress]),
-					'I' => (($paramaddress == -1) ? '' : split(/\@/,$signal->[$paramaddress]),2)[0],
-					'H' => (($paramaddress == -1) ? '' : split(/\@/,$signal->[$paramaddress]),2)[1],
-					'$' => '$',
-					';' => "\x00"
-				};
-				# $1 = the stuff behind the $ we want to expand: a number, or a character from %expands
-				$command =~ s/\$(\\*(\d+|[^0-9]))/expand(\@vars,$1,$expands)/ge;
-				
-				
-				if ($paramchannel!=-1 && $server->channel_find($signal->[$paramchannel])) {
-					$context = $server->channel_find($signal->[$paramchannel]);
-				} else {
-					$context = $server;
-				}
-				
-				foreach my $commandpart (split /\x00/,$command) {
-					$commandpart =~ s/^ +//;  # remove spaces in front
-					$context->command($commandpart);
-				}
+			if (! @vars) {  # doesn't match
+				next;
 			}
-		} elsif ($message =~ m/(?$trigger->{'modifiers'})$trigger->{'regexp'}/) {
-			$matched = 1;
 		}
-		if ($matched) {
-			if ($trigger->{'stop'}) {
-				signal_stop;
+		
+		# if we got this far, it fully matched, and we need to do the replace/command/stop/once
+
+		my $expands = {
+			'M' => $message,
+			'T' => $server->{'tag'},
+			'C' => (($paramchannel == -1) ? '' : $signal->[$paramchannel]),
+			'N' => (($paramnick == -1) ? '' : $signal->[$paramnick]),
+			'A' => (($paramaddress == -1) ? '' : $signal->[$paramaddress]),
+			'I' => (($paramaddress == -1) ? '' : split(/\@/,$signal->[$paramaddress]),2)[0],
+			'H' => (($paramaddress == -1) ? '' : split(/\@/,$signal->[$paramaddress]),2)[1],
+			'$' => '$',
+			';' => "\x00"
+		};
+
+		if (defined($trigger->{'replace'})) { # it's a -replace
+			my $stuff_before = shift @vars; # the stuff before the part that matched
+			my $stuff_after = pop @vars;    # the stuff after it
+
+			my $replace = $trigger->{'replace'};
+			
+			# $1 = the stuff behind the $ we want to expand: a number, or a character from %expands
+			$replace =~ s/\$(\\*(\d+|[^0-9]))/expand(\@vars,$1,$expands)/ge;
+			$message = $stuff_before . $replace . $stuff_after;
+			$changed = 1;
+		}
+		
+		if ($trigger->{'command'}) { # it's a (nonempty) -command
+			my $command = $trigger->{'command'};
+			# $1 = the stuff behind the $ we want to expand: a number, or a character from %expands
+			$command =~ s/\$(\\*(\d+|[^0-9]))/expand(\@vars,$1,$expands)/ge;
+				
+			if ($paramchannel!=-1 && $server->channel_find($signal->[$paramchannel])) {
+				$context = $server->channel_find($signal->[$paramchannel]);
+			} else {
+				$context = $server;
 			}
-			if ($trigger->{'once'}) {
-				splice (@triggers,$index,1);
-				$index--; # index of next trigger now is the same as this one was
+			
+			foreach my $commandpart (split /\x00/,$command) {
+				$commandpart =~ s/^ +//;  # remove spaces in front
+				$context->command($commandpart);
 			}
+		}
+		
+		if ($trigger->{'stop'}) {
+			$stopped = 1;
+		}
+		
+		if ($trigger->{'once'}) {
+			splice (@triggers,$index,1);
+			$index--; # index of next trigger now is the same as this one was
 		}
 	}
-	if ($changed) { # changed with -replace
+
+	if ($stopped) { # stopped with -stop
+		signal_stop;
+	} elsif ($changed) { # changed with -replace
+		$signal->[$parammessage] = $message;
 		signal_continue(@$signal);
 	}
 }
@@ -367,7 +388,13 @@ sub sig_command_script_unload {
 sub compile_trigger {
 	my ($trigger) = @_;
 	$trigger->{'compiled'} = (defined $trigger->{'regexp'} ?
-		qr/(?$trigger->{'modifiers'})$trigger->{'regexp'}/
+		(defined($trigger->{'replace'}) ?
+			# replaces need the part before and after the matched part
+			qr/(?$trigger->{'modifiers'})^(.*?)$trigger->{'regexp'}(.*?)$/
+		:
+			# normal regexp, for -command only
+			qr/(?$trigger->{'modifiers'})$trigger->{'regexp'}/
+		)
 	:
 		undef
 		);
