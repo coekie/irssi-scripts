@@ -382,7 +382,7 @@ push @trigger_types, 'rawin', 'send_command', 'send_text', 'beep', 'mode_channel
 my @trigger_switches = @trigger_types;
 push @trigger_switches, 'nocase', 'stop','once','debug';
 # parameters (with an argument)
-my @trigger_params = ('masks','channels','tags','pattern','regexp','command','replace');
+my @trigger_params = ('pattern','regexp','command','replace');
 # list of all options (including switches)
 my @trigger_options = ('all');
 push @trigger_options, @trigger_switches;
