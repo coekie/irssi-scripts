@@ -347,11 +347,11 @@ sub check_signal_message {
 			'I' => ((!defined($address)) ? '' : substr($address,0,index($address,'@'))),
 			'H' => ((!defined($address)) ? '' : substr($address,index($address,'@')+1)),
 			'$' => '$',
-			';' => "\x00"
+			';' => ";"
 		};
 
 		if (defined($trigger->{'replace'})) { # it's a -replace
-			$message =~ s/$trigger->{'compregexp'}/do_expands($trigger->{'replace'},$expands,$message)/ge;
+			$message =~ s/$trigger->{'compregexp'}/do_expands($trigger->{'compreplace'},$expands,$message)/ge;
 			$changed = 1;
 		}
 		
@@ -359,6 +359,7 @@ sub check_signal_message {
 			my $command = $trigger->{'command'};
 			# $1 = the stuff behind the $ we want to expand: a number, or a character from %expands
 			$command = do_expands($command, $expands, $message);
+			$command =~ s/\$/\$\$/;
 			
 			if (defined($server)) {
 				if (defined($channelname) && $server->channel_find($channelname)) {
@@ -370,13 +371,10 @@ sub check_signal_message {
 				$context = undef;
 			}
 			
-			foreach my $commandpart (split /\x00/,$command) {
-				$commandpart =~ s/^ +//;  # remove spaces in front
-				if (defined($context)) {
-					$context->command($commandpart);
-				} else {
-					Irssi::command($commandpart);
-				}
+			if (defined($context)) {
+				$context->command("eval $command");
+			} else {
+				Irssi::command("eval $command");
 			}
 		}
 		
@@ -405,7 +403,7 @@ sub check_signal_message {
 # used in check_signal_message to expand $'s
 # $inthis is a string that can contain $ stuff (like 'foo$1bar$N')
 sub do_expands {
-	my ($inthis, $expands,$from) = @_;
+	my ($inthis, $expands, $from) = @_;
 	# @+ and @- are copied because there are two s/// nested, and the inner needs the $1 and $2,... of the outer one
 	my @plus = @+;
 	my @min = @-;
@@ -520,6 +518,11 @@ sub compile_trigger {
 	}
 	
 	$trigger->{'compregexp'} = qr/$regexp/;
+	
+	if(defined($trigger->{'replace'})) {
+		(my $replace = $trigger->{'replace'}) =~ s/\$/\$\$/g;
+		$trigger->{'compreplace'} = Irssi::parse_special($replace);
+	}
 }
 
 # rebuilds triggers_by_type and updates signal binds
