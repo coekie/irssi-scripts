@@ -287,7 +287,7 @@ sub sig_send_text_or_command {
 }
 
 my %filters = (
-'tag' => {
+'tags' => {
 	'sub' => sub {
 		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
 		
