@@ -39,7 +39,7 @@ When to match:
                  send_text: lines you type that aren't commands
                  beep: when irssi beeps
      -pattern: The message must match <pattern>. ? and * can be used as wildcards
-     -regexp: The message must match <regexp>. (see man 7 regex or man perlretut)
+     -regexp: The message must match <regexp>. (see man perlre)
      -nocase: Match the regexp case insensitive
      -tags: Only trigger on server with tag in <tags>. A space-delimited list.
      -channels: Only trigger in <channels>. A space-delimited list. (use quotes)
