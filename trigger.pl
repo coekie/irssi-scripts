@@ -21,8 +21,6 @@ $VERSION = '0.6.1+1';
 	changed  	=> '23/11/04',
 );
 
-my @triggers;
-
 sub cmd_help {
 	Irssi::print ( <<SCRIPTHELP_EOF
 
@@ -100,6 +98,9 @@ SCRIPTHELP_EOF
    ,MSGLEVEL_CLIENTCRAP);
 } # /
 
+my @triggers; # array of all triggers
+my %triggers_by_type; # hash mapping types on triggers of that type
+
 #switches in -all option
 my @trigger_all_switches = ('publics','privmsgs','pubactions','privactions','pubnotices','privnotices','joins','parts','quits','kicks','topics','invites');
 #list of all switches
@@ -155,12 +156,13 @@ signal_add_first("message invite" => sub {check_signal_message(\@_,-1,1,2,3,'inv
 #  set $param* to -1 if not present (only allowed for message and channel)
 sub check_signal_message {
 	my ($signal,$parammessage,$paramchannel,$paramnick,$paramaddress,$condition) = @_;
-	my ($trigger, $changed, $stopped, $context);
+	my ($trigger, $changed, $stopped, $context, $need_rebuild);
 	my $server = $signal->[0];
 	my $message = ($parammessage == -1) ? '' : $signal->[$parammessage];
 
-	for (my $index=0;$index < scalar(@triggers);$index++) { 
-		my $trigger = $triggers[$index];
+	return if (!$triggers_by_type{$condition});
+	for (my $index=0;$index < scalar(@{$triggers_by_type{$condition}});$index++) { 
+		my $trigger = $triggers_by_type{$condition}->[$index];
 		if (!$trigger->{"$condition"}) {
 			next; # wrong type of message
 		}
@@ -269,12 +271,15 @@ sub check_signal_message {
 		
 		if ($trigger->{'once'}) {
 			splice (@triggers,$index,1);
-			$index--; # index of next trigger now is the same as this one was
+			$need_rebuild = 1;
 		}
 	}
 
+	if ($need_rebuild) {
+		rebuild();
+	}
 	if ($stopped) { # stopped with -stop
-		signal_stop;
+		signal_stop();
 	} elsif ($changed) { # changed with -replace
 		$signal->[$parammessage] = $message;
 		signal_continue(@$signal);
@@ -368,31 +373,9 @@ sub get_flags {
 	return $flags;
 }
 
-################################
-### manage the triggers-list ###
-################################
-
-# TRIGGER SAVE
-sub cmd_save {
-	my $filename = Irssi::settings_get_str('trigger_file');
-	my $io = new IO::File $filename, "w";
-	if (defined $io) {
-		my $dumper = Data::Dumper->new([\@triggers]);
-		$dumper->Purity(1)->Deepcopy(1);
-		$io->print("#Triggers file version $VERSION\n");
-		$io->print($dumper->Dump);
-		$io->close;
-	}
-	Irssi::print("Triggers saved to ".$filename);
-}
-
-# save on unload
-sub sig_command_script_unload {
-	my $script = shift;
-	if ($script =~ /(.*\/)?$IRSSI{'name'}(\.pl)? *$/) {
-		cmd_save();
-	}
-}
+########################################################
+### internal stuff called by manage, needed by above ###
+########################################################
 
 my %mask_to_regexp = ();
 foreach my $i (0..255) {
@@ -421,6 +404,49 @@ sub compile_trigger {
 	}
 	
 	$trigger->{'compregexp'} = qr/$regexp/;
+}
+
+# rebuilds triggers_by_type
+sub rebuild {
+	%triggers_by_type = ();
+	foreach my $trigger (@triggers) {
+		foreach my $type (@trigger_all_switches) {
+			if ($trigger->{$type}) {
+				push @{$triggers_by_type{$type}}, ($trigger);
+			}
+		}
+	}
+	print Dumper(\%triggers_by_type);
+}
+
+command_bind('trigger test', sub {
+	print Dumper(scalar(@{$triggers_by_type{'publics'}}));
+});
+
+################################
+### manage the triggers-list ###
+################################
+
+# TRIGGER SAVE
+sub cmd_save {
+	my $filename = Irssi::settings_get_str('trigger_file');
+	my $io = new IO::File $filename, "w";
+	if (defined $io) {
+		my $dumper = Data::Dumper->new([\@triggers]);
+		$dumper->Purity(1)->Deepcopy(1);
+		$io->print("#Triggers file version $VERSION\n");
+		$io->print($dumper->Dump);
+		$io->close;
+	}
+	Irssi::print("Triggers saved to ".$filename);
+}
+
+# save on unload
+sub sig_command_script_unload {
+	my $script = shift;
+	if ($script =~ /(.*\/)?$IRSSI{'name'}(\.pl)? *$/) {
+		cmd_save();
+	}
 }
 
 # TRIGGER LOAD
@@ -484,6 +510,7 @@ sub cmd_load {
 	if ($converted) {
 		Irssi::print("Trigger: Triggers file will be in new format next time it's saved.");
 	}
+	rebuild();
 }
 
 # converts a trigger back to "-switch -options 'foo'" form
@@ -543,6 +570,7 @@ sub cmd_add {
 		push @triggers, $trigger;
 		Irssi::print("Added trigger " . scalar(@triggers) .": ". to_string($trigger));
 	}
+	rebuild();
 }
 
 # TRIGGER CHANGE <nr> <options>
@@ -554,7 +582,8 @@ sub cmd_change {
 		if(parse_options($triggers[$index],@args)) {
 			Irssi::print("Trigger " . ($index+1) ." changed to: ". to_string($triggers[$index]));
 		}
-	}	
+	}
+	rebuild();
 }
 
 # parses options for TRIGGER ADD and TRIGGER CHANGE
@@ -648,6 +677,7 @@ sub cmd_del {
 		Irssi::print("Deleted ". ($index+1) .": ". to_string($triggers[$index]));
 		splice (@triggers,$index,1);
 	}
+	rebuild();
 }
 
 # TRIGGER MOVE <num> <num>
