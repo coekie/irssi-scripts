@@ -4,7 +4,7 @@
 # - -replace \x02 
 
 use strict;
-use Irssi 20020324 qw (command_bind command_runsub command signal_add_first signal_continue signal_stop);
+use Irssi 20020324 qw (command_bind command_runsub command signal_add_first signal_continue signal_stop signal_remove);
 use Text::ParseWords;
 use IO::File;
 use Data::Dumper; 
@@ -117,39 +117,80 @@ push @trigger_options, @trigger_params;
 ### catch the signals & do your thing ###
 #########################################
 
+my @signals = (
 # "message public", SERVER_REC, char *msg, char *nick, char *address, char *target
-signal_add_first("message public" => sub {check_signal_message(\@_,1,4,2,3,'publics');});
+{
+	'types' => ['publics'],
+	'signal' => 'message public',
+	'sub' => sub {check_signal_message(\@_,1,4,2,3,'publics');}
+},
 # "message private", SERVER_REC, char *msg, char *nick, char *address
-signal_add_first("message private" => sub {check_signal_message(\@_,1,-1,2,3,'privmsgs');});
+{
+	'types' => ['privmsgs'],
+	'signal' => 'message private',
+	'sub' => sub {check_signal_message(\@_,1,-1,2,3,'privmsgs');}
+},
 # "message irc action", SERVER_REC, char *msg, char *nick, char *address, char *target
-signal_add_first("message irc action" => sub {
-	if ($_[4] eq $_[0]->{nick}) {
-		check_signal_message(\@_,1,-1,2,3,'privactions');
-	} else {
-		check_signal_message(\@_,1,4,2,3,'pubactions');
+{
+	'types' => ['privactions','pubactions'],
+	'signal' => 'message irc action',
+	'sub' => sub {
+		if ($_[4] eq $_[0]->{nick}) {
+			check_signal_message(\@_,1,-1,2,3,'privactions');
+		} else {
+			check_signal_message(\@_,1,4,2,3,'pubactions');
+		}
 	}
-});
+},
 # "message irc notice", SERVER_REC, char *msg, char *nick, char *address, char *target
-signal_add_first("message irc notice" => sub {
-	if ($_[4] eq $_[0]->{nick}) {
-		check_signal_message(\@_,1,-1,2,3,'privnotices');
-	} else {
-		check_signal_message(\@_,1,4,2,3,'pubnotices');
+{
+	'types' => ['privnotices','pubnotices'],
+	'signal' => 'message irc notice',
+	'sub' => sub {
+		if ($_[4] eq $_[0]->{nick}) {
+			check_signal_message(\@_,1,-1,2,3,'privnotices');
+		} else {
+			check_signal_message(\@_,1,4,2,3,'pubnotices');
+		}
 	}
-});
-
+},
 # "message join", SERVER_REC, char *channel, char *nick, char *address
-signal_add_first("message join" => sub {check_signal_message(\@_,-1,1,2,3,'joins');});
+{
+	'types' => ['joins'],
+	'signal' => 'message join',
+	'sub' => sub {check_signal_message(\@_,-1,1,2,3,'joins');}
+},
 # "message part", SERVER_REC, char *channel, char *nick, char *address, char *reason
-signal_add_first("message part" => sub {check_signal_message(\@_,4,1,2,3,'parts');});
+{
+	'types' => ['parts'],
+	'signal' => 'message part',
+	'sub' => sub {check_signal_message(\@_,4,1,2,3,'parts');}
+},
 # "message quit", SERVER_REC, char *nick, char *address, char *reason
-signal_add_first("message quit" => sub {check_signal_message(\@_,3,-1,1,2,'quits');});
+{
+	'types' => ['quits'],
+	'signal' => 'message quit',
+	'sub' => sub {check_signal_message(\@_,3,-1,1,2,'quits');}
+},
 # "message kick", SERVER_REC, char *channel, char *nick, char *kicker, char *address, char *reason
-signal_add_first("message kick" => sub {check_signal_message(\@_,5,1,3,4,'kicks');});
+{
+	'types' => ['kicks'],
+	'signal' => 'message kick',
+	'sub' => sub {check_signal_message(\@_,5,1,3,4,'kicks');}
+},
 # "message topic", SERVER_REC, char *channel, char *topic, char *nick, char *address
-signal_add_first("message topic" => sub {check_signal_message(\@_,2,1,3,4,'topics');});
+{
+	'types' => ['topics'],
+	'signal' => 'message topic',
+	'sub' => sub {check_signal_message(\@_,2,1,3,4,'topics');}
+},
 # "message invite", SERVER_REC, char *channel, char *nick, char *address
-signal_add_first("message invite" => sub {check_signal_message(\@_,-1,1,2,3,'invites');});
+{
+	'types' => ['invites'],
+	'signal' => 'message invite',
+	'sub' => sub {check_signal_message(\@_,-1,1,2,3,'invites');}
+}
+);
 
 # check the triggers on $signal's $parammessage parameter, for triggers with $condition set
 # in $paramchannel, for $paramnick!$paramaddress
@@ -406,7 +447,7 @@ sub compile_trigger {
 	$trigger->{'compregexp'} = qr/$regexp/;
 }
 
-# rebuilds triggers_by_type
+# rebuilds triggers_by_type and updates signal binds
 sub rebuild {
 	%triggers_by_type = ();
 	foreach my $trigger (@triggers) {
@@ -416,7 +457,22 @@ sub rebuild {
 			}
 		}
 	}
-	print Dumper(\%triggers_by_type);
+	
+	foreach my $signal (@signals) {
+		my $should_bind = 0;
+		foreach my $type (@{$signal->{'types'}}) {
+			if (defined($triggers_by_type{$type})) {
+				$should_bind = 1;
+			}
+		}
+		if ($should_bind && !$signal->{'bind'}) {
+			signal_add_first($signal->{'signal'}, $signal->{'sub'});
+			$signal->{'bind'} = 1;
+		} elsif (!$should_bind && $signal->{'bind'}) {
+			signal_remove($signal->{'signal'}, $signal->{'sub'});
+			$signal->{'bind'} = 0;
+		}
+	}
 }
 
 command_bind('trigger test', sub {
