@@ -40,6 +40,7 @@ When to match:
                Types that aren't included in -all:
                  rawin: raw text incoming from the server
                  send_text: lines you type that aren't commands
+                 beep: when irssi beeps
      -pattern: The message must match <pattern>. ? and * can be used as wildcards
      -regexp: The message must match <regexp>. (see man 7 regex or man perlretut)
      -nocase: Match the regexp case insensitive
@@ -109,7 +110,7 @@ my $recursion_depth = 0;
 my @trigger_all_switches = ('publics','privmsgs','pubactions','privactions','pubnotices','privnotices','joins','parts','quits','kicks','topics','invites');
 # all trigger types
 my @trigger_types = @trigger_all_switches;
-push @trigger_types, 'rawin', 'send_command', 'send_text';
+push @trigger_types, 'rawin', 'send_command', 'send_text', 'beep';
 #list of all switches
 my @trigger_switches = @trigger_types;
 push @trigger_switches, 'nocase', 'stop','once';
@@ -218,6 +219,12 @@ my @signals = (
 	'sub' => sub {
 		sig_send_text_or_command(\@_,0);
 	}
+},
+# "beep"
+{
+	'types' => ['beep'],
+	'signal' => 'beep',
+	'sub' => sub {check_signal_message(\@_,-1,undef,undef,undef,undef,'beep');}
 }
 );
 
