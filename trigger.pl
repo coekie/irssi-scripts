@@ -7,7 +7,7 @@ use IO::File;
 use Data::Dumper; 
 use vars qw($VERSION %IRSSI);
 
-$VERSION = '0.6.1+1';
+$VERSION = '0.6.1+2';
 %IRSSI = (
 	authors  	=> 'Wouter Coekaerts',
 	contact  	=> 'wouter@coekaerts.be',
@@ -246,7 +246,29 @@ my @signals = (
 			}
 		}
 	}
-}
+},
+# "notifylist joined", SERVER_REC, char *nick, char *user, char *host, char *realname, char *awaymsg
+# ($signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra)
+{
+	'types' => ['notify_join'],
+	'signal' => 'notifylist joined',
+	'sub' => sub {check_signal_message(\@_, 5, $_[0], undef, $_[1], $_[2].'@'.$_[3], 'notify_join', {'realname' => $_[4]});}
+},
+{
+	'types' => ['notify_part'],
+	'signal' => 'notifylist left',
+	'sub' => sub {check_signal_message(\@_, 5, $_[0], undef, $_[1], $_[2].'@'.$_[3], 'notify_left', {'realname' => $_[4]});}
+},
+{
+	'types' => ['notify_unidle'],
+	'signal' => 'notifylist unidle',
+	'sub' => sub {check_signal_message(\@_, 5, $_[0], undef, $_[1], $_[2].'@'.$_[3], 'notify_unidle', {'realname' => $_[4]});}
+},
+{
+	'types' => ['notify_away', 'notify_unaway'],
+	'signal' => 'notifylist away changed',
+	'sub' => sub {check_signal_message(\@_, 5, $_[0], undef, $_[1], $_[2].'@'.$_[3], ($_[5] ? 'notify_away' : 'notify_unaway'), {'realname' => $_[4]});}
+},
 );
 
 sub sig_send_text_or_command {
@@ -265,6 +287,76 @@ sub sig_send_text_or_command {
 }
 
 my %filters = (
+'tag' => {
+	'sub' => sub {
+		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
+		
+		if (!defined($server)) {
+			return 0;
+		}
+		my $matches = 0;
+		foreach my $tag (split(/ /,$param)) {
+			if (lc($server->{'tag'}) eq lc($tag)) {
+				$matches = 1;
+				last;
+			}
+		}
+		return $matches;
+	}
+},
+'channels' => {
+	'sub' => sub {
+		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
+		
+		if (!defined($channelname) || !defined($server)) {
+			return 0;
+		}
+		my $matches = 0;
+		foreach my $trigger_channel (split(/ /,$param)) {
+			if (lc($channelname) eq lc($trigger_channel)
+				|| lc($server->{'tag'}.'/'.$channelname) eq lc($trigger_channel)
+				|| lc($server->{'tag'}.'/') eq lc($trigger_channel)) {
+				$matches = 1;
+				last; # this channel matches, stop checking channels
+			}
+		}
+		return $matches;
+	}
+},
+'masks' => {
+	'sub' => sub {
+		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
+		return  (defined($nickname) && defined($address) && defined($server) && $server->masks_match($param, $nickname, $address));
+	}
+},
+'hasmode' => {
+	'sub' => sub {
+		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
+		my ($channelrec, $nickrec);
+		( defined($channelname)
+		  and defined($nickname)
+		  and defined($server)
+		  and $channelrec = $server->channel_find($channelname)
+		  and $nickrec = $channelrec->nick_find($nickname)
+		) or return 0;
+		
+		my $modes = ($nickrec->{'op'}?'o':'').($nickrec->{'voice'}?'v':'').($nickrec->{'halfop'}?'h':'');
+		return check_modes($modes,$param);
+	}
+},
+'hasflag' => {
+	'sub' => sub {
+		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
+		if (!defined($nickname) || !defined($address) || !defined($server)) {
+			return 0;
+		}
+		my $flags = get_flags ($server->{'chatnet'},$channelname,$nickname,$address);
+		if (!defined($flags)) {
+			return 0;
+		}
+		return check_modes($flags,$param);
+	}
+},
 'mode_type' => {
 	'types' => ['mode_channel'],
 	'sub' => sub {
@@ -285,12 +377,12 @@ my %filters = (
 my @trigger_all_switches = ('publics','privmsgs','pubactions','privactions','pubnotices','privnotices','joins','parts','quits','kicks','topics','invites');
 # all trigger types
 my @trigger_types = @trigger_all_switches;
-push @trigger_types, 'rawin', 'send_command', 'send_text', 'beep', 'mode_channel';
+push @trigger_types, 'rawin', 'send_command', 'send_text', 'beep', 'mode_channel', 'notify_join', 'notify_part', 'notify_away', 'notify_unaway', 'notify_unidle';
 # list of all switches
 my @trigger_switches = @trigger_types;
-push @trigger_switches, 'nocase', 'stop','once';
+push @trigger_switches, 'nocase', 'stop','once','debug';
 # parameters (with an argument)
-my @trigger_params = ('masks','channels','tags','pattern','regexp','command','replace','hasmode','hasflag');
+my @trigger_params = ('masks','channels','tags','pattern','regexp','command','replace');
 # list of all options (including switches)
 my @trigger_options = ('all');
 push @trigger_options, @trigger_switches;
@@ -318,81 +410,13 @@ TRIGGER:
 	for (my $index=0;$index < scalar(@{$triggers_by_type{$condition}});$index++) { 
 		my $trigger = $triggers_by_type{$condition}->[$index];
 		if (!$trigger->{$condition}) {
-			next; # wrong type of message
-		}
-		if ($trigger->{'tags'}) { # check if the tag matches
-			if (!defined($server)) {
-				next;
-			}
-			my $matches = 0;
-			foreach my $tag (split(/ /,$trigger->{'tags'})) {
-				if (lc($server->{'tag'}) eq lc($tag)) {
-					$matches = 1;
-					last;
-				}
-			}
-			if (!$matches) {
-				next;
-			}
-		}
-	
-		if ($trigger->{'channels'}) { # check if the channel matches
-			if (!defined($channelname) || !defined($server)) {
-				next;
-			}
-			my $matches = 0;
-			foreach my $trigger_channel (split(/ /,$trigger->{'channels'})) {
-				if (lc($channelname) eq lc($trigger_channel)
-				  || lc($server->{'tag'}.'/'.$channelname) eq lc($trigger_channel)
-				  || lc($server->{'tag'}.'/') eq lc($trigger_channel)) {
-					$matches = 1;
-					last; # this channel matches, stop checking channels
-				}
-			}
-			if (!$matches) {
-				next; # this trigger doesn't match, try next trigger...
-			}
-		}
-		# check the mask
-		if ($trigger->{'masks'} && (!defined($nickname) || !defined($address) || !defined($server) || !$server->masks_match($trigger->{'masks'}, $nickname, $address))) {
-			next; # this trigger doesn't match
-
-		}
-		# check hasmodes
-		if ($trigger->{'hasmode'}) {
-			my ($channelrec, $nickrec);
-			( defined($channelname)
-			  and defined($nickname)
-			  and defined($server)
-			  and $channelrec = $server->channel_find($channelname)
-			  and $nickrec = $channelrec->nick_find($nickname)
-			) or next;
-
-			my $modes = ($nickrec->{'op'}?'o':'').($nickrec->{'voice'}?'v':'').($nickrec->{'halfop'}?'h':'');
-			if (!check_modes($modes,$trigger->{'hasmode'})) {
-				next;
-			}	
-		}
-
-		# check hasflags
-		if ($trigger->{'hasflag'}) {
-			if (!defined($nickname) || !defined($address) || !defined($server)) {
-				next;
-			}
-			my $flags = get_flags ($server->{'chatnet'},$channelname,$nickname,$address);
-			if (!defined($flags)) {
-				next;
-			}
-			if (!check_modes($flags,$trigger->{'hasflag'})) {
-				next;
-			}
+			Irssi::print("DEBUG: wrong type of trigger... this shouldn't happen");
 		}
 		
 		# check filters
 		foreach my $trigfilter (@{$trigger->{'filters'}}) {
-			print "DEBUG: checking filter " . $trigfilter->[0];
-			# TODO save reference to filter directly into trigger... but then we can't use Dumper for saving
-			if (! $filters{$trigfilter->[0]}->{'sub'}($trigfilter->[1], $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) ) {
+			if (! ($trigfilter->[2]($trigfilter->[1], $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra))) {
+			
 				next TRIGGER;
 			}
 		}
@@ -438,6 +462,10 @@ TRIGGER:
 			} else {
 				Irssi::command("eval $command");
 			}
+		}
+
+		if ($trigger->{'debug'}) {
+			print("DEBUG: trigger $condition pmesg=$parammessage message=$message server=$server->{tag} channel=$channelname nick=$nickname address=$address " . join(' ',map {$_ . '=' . $extra->{$_}} keys(%$extra)));
 		}
 		
 		if ($trigger->{'stop'}) {
@@ -634,16 +662,25 @@ sub rebuild {
 
 # TRIGGER SAVE
 sub cmd_save {
+	#my $filename = Irssi::settings_get_str('trigger_file');
+	#my $io = new IO::File $filename, "w";
+	#if (defined $io) {
+	#	my $dumper = Data::Dumper->new([\@triggers]);
+	#	$dumper->Purity(1)->Deepcopy(1);
+	#	$io->print("#Triggers file version $VERSION\n");
+	#	$io->print($dumper->Dump);
+	#	$io->close;
+	#}
+	
 	my $filename = Irssi::settings_get_str('trigger_file');
 	my $io = new IO::File $filename, "w";
 	if (defined $io) {
-		my $dumper = Data::Dumper->new([\@triggers]);
-		$dumper->Purity(1)->Deepcopy(1);
 		$io->print("#Triggers file version $VERSION\n");
-		$io->print($dumper->Dump);
+		foreach my $trigger (@triggers) {
+			$io->print(to_string($trigger) . "\n");
+		}
 		$io->close;
 	}
-	#Irssi::print("Triggers saved to ".$filename);
 	Irssi::printformat(MSGLEVEL_CLIENTNOTICE, 'trigger_saved', $filename);
 }
 
@@ -667,52 +704,75 @@ sub cmd_load {
 		return;
 	}
 	if (defined $io) {
-		no strict 'vars';
 		my $text;
-		$text .= $_ foreach ($io->getlines);
+		$text = $io->getline;
 		my $file_version = '';
 		if ($text =~ /^#Triggers file version (.*)\n/) {
 			$file_version = $1;
 		}
-		my $rep = eval "$text";
-		@triggers = @$rep if ref $rep;
+		if ($file_version lt '0.6.1+2') {
+			no strict 'vars';
+			$text .= $_ foreach ($io->getlines);
+			my $rep = eval "$text";
+			if (! ref $rep) {
+				Irssi::print("Error in triggers file");
+				return;
+			}
+			my @old_triggers = @$rep;
 		
-		for (my $index=0;$index < scalar(@triggers);$index++) { 
-			my $trigger = $triggers[$index];
-
-			# compile regexp
-			compile_trigger($trigger);
-
-			if ($file_version lt '0.6.1') {
-				# convert old names: notices => pubnotices, actions => pubactions
-				foreach $oldname ('notices','actions') {
-					if ($trigger->{$oldname}) {
-						delete $trigger->{$oldname};
-						$trigger->{'pub'.$oldname} = 1;
-						$converted = 1;
+			for (my $index=0;$index < scalar(@old_triggers);$index++) { 
+				my $trigger = $old_triggers[$index];
+	
+				# compile regexp
+				# compile_trigger($trigger);
+	
+				if ($file_version lt '0.6.1') {
+					# convert old names: notices => pubnotices, actions => pubactions
+					foreach $oldname ('notices','actions') {
+						if ($trigger->{$oldname}) {
+							delete $trigger->{$oldname};
+							$trigger->{'pub'.$oldname} = 1;
+							$converted = 1;
+						}
 					}
 				}
-			}
-			if ($file_version lt '0.6.1+1' && $trigger->{'modifiers'}) {
-				if ($trigger->{'modifiers'} =~ /i/) {
-					$trigger->{'nocase'} = 1;
-					Irssi::print("Trigger: trigger ".($index+1)." had 'i' in it's modifiers, it has been converted to -nocase");
+				if ($file_version lt '0.6.1+1' && $trigger->{'modifiers'}) {
+					if ($trigger->{'modifiers'} =~ /i/) {
+						$trigger->{'nocase'} = 1;
+						Irssi::print("Trigger: trigger ".($index+1)." had 'i' in it's modifiers, it has been converted to -nocase");
+					}
+					if ($trigger->{'modifiers'} !~ /^[ig]*$/) {
+						Irssi::print("Trigger: trigger ".($index+1)." had unrecognised modifier '". $trigger->{'modifiers'} ."', which couldn't be converted.");
+					}
+					delete $trigger->{'modifiers'};
+					$converted = 1;
 				}
-				if ($trigger->{'modifiers'} !~ /^[ig]*$/) {
-					Irssi::print("Trigger: trigger ".($index+1)." had unrecognised modifier '". $trigger->{'modifiers'} ."', which couldn't be converted.");
+				
+				if (defined($trigger->{'replace'}) && ! $trigger->{'regexp'}) {
+					Irssi::print("Trigger: trigger ".($index+1)." had -replace but no -regexp, removed it");
+					splice (@old_triggers,$index,1);
+					$index--; # nr of next trigger now is the same as this one was
 				}
-				delete $trigger->{'modifiers'};
-				$converted = 1;
+				
+				# convert to text with compat, and then to new trigger hash
+				$text = to_string($trigger,1);
+				my @args = &shellwords($text . ' a');
+				my $trigger = parse_options({},@args);
+				if ($trigger) {
+					push @triggers, $trigger;
+				}
 			}
-			
-			if (defined($trigger->{'replace'}) && ! $trigger->{'regexp'}) {
-				Irssi::print("Trigger: trigger ".($index+1)." had -replace but no -regexp, removed it");
-				splice (@triggers,$index,1);
-				$index--; # nr of next trigger now is the same as this one was
+		} else { # new format
+			while ( $text = $io->getline ) {
+				chop($text);
+				my @args = &shellwords($text . ' a');
+				my $trigger = parse_options({},@args);
+				if ($trigger) {
+					push @triggers, $trigger;
+				}
 			}
 		}
 	}
-	#Irssi::print("Triggers loaded from ".$filename);
 	Irssi::printformat(MSGLEVEL_CLIENTNOTICE, 'trigger_loaded', $filename);
 	if ($converted) {
 		Irssi::print("Trigger: Triggers file will be in new format next time it's saved.");
@@ -721,8 +781,9 @@ sub cmd_load {
 }
 
 # converts a trigger back to "-switch -options 'foo'" form
+# if $compat, $trigger is in the old format (used to convert)
 sub to_string {
-	my ($trigger) = @_;
+	my ($trigger, $compat) = @_;
 	my $string;
 	
 	# check if all @trigger_all_switches are set
@@ -743,8 +804,16 @@ sub to_string {
 		}
 	}
 	
-	foreach my $trigfilter (@{$trigger->{'filters'}}) {
-		$string .= '-' . $trigfilter->[0] . " '$trigfilter->[1]' ";
+	if ($compat) {
+		foreach my $filter (keys(%filters)) {
+			if ($trigger->{$filter}) {
+				$string .= '-' . $filter . " '$trigger->{$filter}'".' ';
+			}
+		}
+	} else {
+		foreach my $trigfilter (@{$trigger->{'filters'}}) {
+			$string .= '-' . $trigfilter->[0] . " '$trigfilter->[1]' ";
+		}
 	}
 
 	foreach my $param (@trigger_params) {
@@ -860,7 +929,7 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 		}
 		
 		if ($filters{$option}) {
-			push @{$trigger->{'filters'}}, [$option, shift @args];
+			push @{$trigger->{'filters'}}, [$option, shift @args, $filters{$option}->{'sub'}];
 			next ARGS;
 		}
 	}
@@ -933,6 +1002,10 @@ sub cmd_list {
 		Irssi::printformat(MSGLEVEL_CLIENTCRAP, 'trigger_line', $i++, to_string($trigger));
 	}
 }
+
+command_bind('trigger debug', sub {
+	print "DEBUG: " . Dumper(\@triggers);
+});
 
 ######################
 ### initialisation ###
