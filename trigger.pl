@@ -287,7 +287,7 @@ sub do_expands {
 	my @plus = @+;
 	my @min = @-;
 	my $p = \@plus; my $m = \@min;
-	$inthis =~ s/\$(\\*(\d+|[^0-9]))/expand($1,$expands,$m,$p,$from)/ge;	
+	$inthis =~ s/\$(\\*(\d+|[^0-9x]|x[0-9a-fA-F][0-9a-fA-F]))/expand($1,$expands,$m,$p,$from)/ge;	
 	return $inthis;
 }
 
@@ -302,6 +302,8 @@ sub expand {
 		my $exp = expand($to_expand,$expands,$min,$plus,$from); # first expand without \
 		$exp =~ s/([^a-zA-Z0-9])/\\\1/g; # escape non-word chars
 		return $exp;
+	} elsif ($to_expand =~ /x([0-9a-fA-F]{2})/) { # $xAA
+		return chr(hex($1));
 	} else { # look up in $expands
 		return $expands->{$to_expand};
 	}
