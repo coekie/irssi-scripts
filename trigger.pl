@@ -102,7 +102,7 @@ my @triggers; # array of all triggers
 my %triggers_by_type; # hash mapping types on triggers of that type
 
 #switches in -all option
-my @trigger_all_switches = ('publics','privmsgs','pubactions','privactions','pubnotices','privnotices','joins','parts','quits','kicks','topics','invites');
+my @trigger_all_switches = ('publics','privmsgs','pubactions','privactions','pubnotices','privnotices','joins','parts','quits','kicks','topics','invites','rawin');
 #list of all switches
 my @trigger_switches = @trigger_all_switches;
 push @trigger_switches, 'nocase', 'stop','once';
@@ -189,6 +189,12 @@ my @signals = (
 	'types' => ['invites'],
 	'signal' => 'message invite',
 	'sub' => sub {check_signal_message(\@_,-1,1,2,3,'invites');}
+},
+# "server incoming", SERVER_REC, char *data
+{
+	'types' => ['rawin'],
+	'signal' => 'server incoming',
+	'sub' => sub {check_signal_message(\@_,1,-1,-1,-1,'rawin');}
 }
 );
 
@@ -238,7 +244,7 @@ sub check_signal_message {
 			}
 		}
 		# check the mask
-		if ($trigger->{'masks'} && !$server->masks_match($trigger->{'masks'}, $signal->[$paramnick], $signal->[$paramaddress])) {
+		if ($trigger->{'masks'} && ($paramnick == -1 || $paramaddress == -1 || !$server->masks_match($trigger->{'masks'}, $signal->[$paramnick], $signal->[$paramaddress]))) {
 			next; # this trigger doesn't match
 
 		}
@@ -246,6 +252,7 @@ sub check_signal_message {
 		if ($trigger->{'hasmode'}) {
 			my ($channel, $nick);
 			( $paramchannel != -1
+			  and $paramnick != -1
 			  and $channel = $server->channel_find($signal->[$paramchannel])
 			  and $nick = $channel->nick_find($signal->[$paramnick])
 			) or next;
@@ -259,6 +266,9 @@ sub check_signal_message {
 		# check hasflags
 		if ($trigger->{'hasflag'}) {
 			my $channel = ($paramchannel == -1) ? undef : $signal->[$paramchannel];
+			if ($paramnick == -1 || $paramaddress == -1) {
+				next;
+			}
 			my $flags = get_flags ($server->{'chatnet'},$channel,$signal->[$paramnick],$signal->[$paramaddress]);
 			if (!defined($flags)) {
 				next;
