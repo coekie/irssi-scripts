@@ -1,8 +1,5 @@
 # Do /TRIGGER HELP for help
 
-# TODO (before releasable)
-# - -replace \x02 
-
 use strict;
 use Irssi 20020324 qw (command_bind command_runsub command signal_add_first signal_continue signal_stop signal_remove);
 use Text::ParseWords;
@@ -120,6 +117,19 @@ my @trigger_params = ('masks','channels','tags','pattern','regexp','command','re
 my @trigger_options = ('all');
 push @trigger_options, @trigger_switches;
 push @trigger_options, @trigger_params;
+
+###############
+### formats ###
+###############
+
+Irssi::theme_register([
+	'trigger_header' => 'Triggers:',
+	'trigger_line' => '%#$[-4]0 $1',
+	'trigger_added' => 'Trigger $0 added: $1',
+	'trigger_not_found' => 'Trigger {hilight $0} not found',
+	'trigger_saved' => 'Triggers saved to $0',
+	'trigger_loaded' => 'Triggers loaded from $0'
+]);
 
 #########################################
 ### catch the signals & do your thing ###
@@ -572,7 +582,8 @@ sub cmd_save {
 		$io->print($dumper->Dump);
 		$io->close;
 	}
-	Irssi::print("Triggers saved to ".$filename);
+	#Irssi::print("Triggers saved to ".$filename);
+	Irssi::printformat(MSGLEVEL_CLIENTNOTICE, 'trigger_saved', $filename);
 }
 
 # save on unload
@@ -640,7 +651,8 @@ sub cmd_load {
 			}
 		}
 	}
-	Irssi::print("Triggers loaded from ".$filename);
+	#Irssi::print("Triggers loaded from ".$filename);
+	Irssi::printformat(MSGLEVEL_CLIENTNOTICE, 'trigger_loaded', $filename);
 	if ($converted) {
 		Irssi::print("Trigger: Triggers file will be in new format next time it's saved.");
 	}
@@ -689,7 +701,8 @@ sub find_trigger {
 	#		return $i;
 	#	}
 	#}
-	Irssi::print ("Trigger $data not found.");
+	#Irssi::print ("Trigger $data not found.");
+	Irssi::printformat(MSGLEVEL_CLIENTCRAP, 'trigger_not_found', $data);
 	return -1; # not found
 }
 
@@ -702,7 +715,8 @@ sub cmd_add {
 	my $trigger = parse_options({},@args);
 	if ($trigger) {
 		push @triggers, $trigger;
-		Irssi::print("Added trigger " . scalar(@triggers) .": ". to_string($trigger));
+		#Irssi::print("Added trigger " . scalar(@triggers) .": ". to_string($trigger));
+		Irssi::printformat(MSGLEVEL_CLIENTCRAP, 'trigger_added', scalar(@triggers), to_string($trigger));
 	}
 	rebuild();
 }
@@ -841,10 +855,12 @@ sub cmd_move {
 # TRIGGER LIST
 sub cmd_list {
 	#my (@args) = @_;
-	Irssi::print ("Trigger list:",MSGLEVEL_CLIENTCRAP);
+	#Irssi::print ("Trigger list:",MSGLEVEL_CLIENTCRAP);
+	Irssi::printformat(MSGLEVEL_CLIENTCRAP, 'trigger_header');
 	my $i=1;
 	foreach my $trigger (@triggers) {
-		Irssi::print(" ". $i++ .": ". to_string($trigger),MSGLEVEL_CLIENTCRAP);
+		#Irssi::print(" ". $i++ .": ". to_string($trigger),MSGLEVEL_CLIENTCRAP);
+		Irssi::printformat(MSGLEVEL_CLIENTCRAP, 'trigger_line', $i++, to_string($trigger));
 	}
 }
 
