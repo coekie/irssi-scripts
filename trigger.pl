@@ -18,7 +18,7 @@ $VERSION = '0.6.1+1';
 	description 	=> 'execute a command or replace text, triggered by a message,notice,join,part,quit,kick,topic or invite',
 	license 	=> 'GPLv2',
 	url     	=> 'http://wouter.coekaerts.be/irssi/',
-	changed  	=> '23/11/04',
+	changed  	=> '$LastChangedDate$',
 );
 
 sub cmd_help {
@@ -36,7 +36,10 @@ TRIGGER ADD %|[-<types>] [-pattern <pattern>|-regexp <regexp>] [-nocase] [-tags 
 When to match:
      -<types>: Trigger on these types of messages. The different types are:
                  publics,privmsgs,pubactions,privactions,pubnotices,privnotices,joins,parts,quits,kicks,topics,invites
-                 -all is an alias for all of them.
+                 -all is an alias for all of the above.
+               Types that aren't included in -all:
+                 rawin: raw text incoming from the server
+                 send_text: lines you type that aren't commands
      -pattern: The message must match <pattern>. ? and * can be used as wildcards
      -regexp: The message must match <regexp>. (see man 7 regex or man perlretut)
      -nocase: Match the regexp case insensitive
@@ -100,11 +103,15 @@ SCRIPTHELP_EOF
 
 my @triggers; # array of all triggers
 my %triggers_by_type; # hash mapping types on triggers of that type
+my $recursion_depth = 0;
 
-#switches in -all option
-my @trigger_all_switches = ('publics','privmsgs','pubactions','privactions','pubnotices','privnotices','joins','parts','quits','kicks','topics','invites','rawin');
+# trigger types in -all option
+my @trigger_all_switches = ('publics','privmsgs','pubactions','privactions','pubnotices','privnotices','joins','parts','quits','kicks','topics','invites');
+# all trigger types
+my @trigger_types = @trigger_all_switches;
+push @trigger_types, 'rawin', 'send_command', 'send_text';
 #list of all switches
-my @trigger_switches = @trigger_all_switches;
+my @trigger_switches = @trigger_types;
 push @trigger_switches, 'nocase', 'stop','once';
 #parameters (with an argument)
 my @trigger_params = ('masks','channels','tags','pattern','regexp','command','replace','hasmode','hasflag');
@@ -122,13 +129,13 @@ my @signals = (
 {
 	'types' => ['publics'],
 	'signal' => 'message public',
-	'sub' => sub {check_signal_message(\@_,1,4,2,3,'publics');}
+	'sub' => sub {check_signal_message(\@_,1,$_[0],$_[4],$_[2],$_[3],'publics');}
 },
 # "message private", SERVER_REC, char *msg, char *nick, char *address
 {
 	'types' => ['privmsgs'],
 	'signal' => 'message private',
-	'sub' => sub {check_signal_message(\@_,1,-1,2,3,'privmsgs');}
+	'sub' => sub {check_signal_message(\@_,1,$_[0],undef,$_[2],$_[3],'privmsgs');}
 },
 # "message irc action", SERVER_REC, char *msg, char *nick, char *address, char *target
 {
@@ -136,9 +143,9 @@ my @signals = (
 	'signal' => 'message irc action',
 	'sub' => sub {
 		if ($_[4] eq $_[0]->{nick}) {
-			check_signal_message(\@_,1,-1,2,3,'privactions');
+			check_signal_message(\@_,1,$_[0],undef,$_[2],$_[3],'privactions');
 		} else {
-			check_signal_message(\@_,1,4,2,3,'pubactions');
+			check_signal_message(\@_,1,$_[0],$_[4],$_[2],$_[3],'pubactions');
 		}
 	}
 },
@@ -148,9 +155,9 @@ my @signals = (
 	'signal' => 'message irc notice',
 	'sub' => sub {
 		if ($_[4] eq $_[0]->{nick}) {
-			check_signal_message(\@_,1,-1,2,3,'privnotices');
+			check_signal_message(\@_,1,$_[0],undef,$_[2],$_[3],'privnotices');
 		} else {
-			check_signal_message(\@_,1,4,2,3,'pubnotices');
+			check_signal_message(\@_,1,$_[0],$_[4],$_[2],$_[3],'pubnotices');
 		}
 	}
 },
@@ -158,62 +165,104 @@ my @signals = (
 {
 	'types' => ['joins'],
 	'signal' => 'message join',
-	'sub' => sub {check_signal_message(\@_,-1,1,2,3,'joins');}
+	'sub' => sub {check_signal_message(\@_,-1,$_[0],$_[1],$_[2],$_[3],'joins');}
 },
 # "message part", SERVER_REC, char *channel, char *nick, char *address, char *reason
 {
 	'types' => ['parts'],
 	'signal' => 'message part',
-	'sub' => sub {check_signal_message(\@_,4,1,2,3,'parts');}
+	'sub' => sub {check_signal_message(\@_,4,$_[0],$_[1],$_[2],$_[3],'parts');}
 },
 # "message quit", SERVER_REC, char *nick, char *address, char *reason
 {
 	'types' => ['quits'],
 	'signal' => 'message quit',
-	'sub' => sub {check_signal_message(\@_,3,-1,1,2,'quits');}
+	'sub' => sub {check_signal_message(\@_,3,$_[0],undef,$_[1],$_[2],'quits');}
 },
 # "message kick", SERVER_REC, char *channel, char *nick, char *kicker, char *address, char *reason
 {
 	'types' => ['kicks'],
 	'signal' => 'message kick',
-	'sub' => sub {check_signal_message(\@_,5,1,3,4,'kicks');}
+	'sub' => sub {check_signal_message(\@_,5,$_[0],$_[1],$_[3],$_[4],'kicks');}
 },
 # "message topic", SERVER_REC, char *channel, char *topic, char *nick, char *address
 {
 	'types' => ['topics'],
 	'signal' => 'message topic',
-	'sub' => sub {check_signal_message(\@_,2,1,3,4,'topics');}
+	'sub' => sub {check_signal_message(\@_,2,$_[0],$_[1],$_[3],$_[4],'topics');}
 },
 # "message invite", SERVER_REC, char *channel, char *nick, char *address
 {
 	'types' => ['invites'],
 	'signal' => 'message invite',
-	'sub' => sub {check_signal_message(\@_,-1,1,2,3,'invites');}
+	'sub' => sub {check_signal_message(\@_,-1,$_[0],$_[1],$_[2],$_[3],'invites');}
 },
 # "server incoming", SERVER_REC, char *data
 {
 	'types' => ['rawin'],
 	'signal' => 'server incoming',
-	'sub' => sub {check_signal_message(\@_,1,-1,-1,-1,'rawin');}
+	'sub' => sub {check_signal_message(\@_,1,$_[0],undef,undef,undef,'rawin');}
+},
+# "send command", char *args, SERVER_REC, WI_ITEM_REC
+{
+	'types' => ['send_command'],
+	'signal' => 'send command',
+	'sub' => sub {
+		sig_send_text_or_command(\@_,1);
+	}
+},
+# "send text", char *line, SERVER_REC, WI_ITEM_REC
+{
+	'types' => ['send_text'],
+	'signal' => 'send text',
+	'sub' => sub {
+		sig_send_text_or_command(\@_,0);
+	}
 }
 );
 
+sub sig_send_text_or_command {
+	my ($signal, $iscommand) = @_;
+	my ($line, $server, $item) = @$signal;
+	my ($channelname,$nickname,$address) = (undef,undef,undef);
+	if ($item && (ref($item) eq 'Irssi::Irc::Channel' || ref($item) eq 'Irssi::Silc::Channel')) {
+		$channelname = $item->{'name'};
+	} elsif ($item && ref($item) eq 'Irssi::Irc::Query') { # TODO Silc query ?
+		$nickname = $item->{'name'};
+		$address = $item->{'address'}
+	}
+	# TODO pass context also for non-channels (queries and other stuff)
+	check_signal_message($signal,0,$server,$channelname,$nickname,$address,$iscommand ? 'send_command' : 'send_text');
+
+}
+
 # check the triggers on $signal's $parammessage parameter, for triggers with $condition set
-# in $paramchannel, for $paramnick!$paramaddress
-#  set $param* to -1 if not present (only allowed for message and channel)
+#  on $server in $channelname, for $nickname!$address
+# set $parammessage to -1 if the signal doesn't have a message
+# for signal without channel, nick or address, set to undef
 sub check_signal_message {
-	my ($signal,$parammessage,$paramchannel,$paramnick,$paramaddress,$condition) = @_;
+	my ($signal,$parammessage,$server,$channelname,$nickname,$address,$condition) = @_;
 	my ($trigger, $changed, $stopped, $context, $need_rebuild);
-	my $server = $signal->[0];
+	#my $server = $signal->[0];
 	my $message = ($parammessage == -1) ? '' : $signal->[$parammessage];
 
 	return if (!$triggers_by_type{$condition});
+	
+	if ($recursion_depth > 10) {
+		Irssi::print("Trigger error: Maximum recursion depth reached, aborting trigger.", MSGLEVEL_CLIENTERROR);
+		return;
+	}
+	$recursion_depth++;
+	
 	for (my $index=0;$index < scalar(@{$triggers_by_type{$condition}});$index++) { 
 		my $trigger = $triggers_by_type{$condition}->[$index];
-		if (!$trigger->{"$condition"}) {
+		if (!$trigger->{$condition}) {
 			next; # wrong type of message
 		}
 		if ($trigger->{'tags'}) { # check if the tag matches
+			if (!defined($server)) {
+				next;
+			}
 			my $matches = 0;
 			foreach my $tag (split(/ /,$trigger->{'tags'})) {
 				if (lc($server->{'tag'}) eq lc($tag)) {
@@ -227,14 +276,14 @@ sub check_signal_message {
 		}
 	
 		if ($trigger->{'channels'}) { # check if the channel matches
-			if ($paramchannel == -1) {
+			if (!defined($channelname) || !defined($server)) {
 				next;
 			}
 			my $matches = 0;
-			foreach my $channel (split(/ /,$trigger->{'channels'})) {
-				if (lc($signal->[$paramchannel]) eq lc($channel)
-				  || lc($server->{'tag'}.'/'.$signal->[$paramchannel]) eq lc($channel)
-				  || lc($server->{'tag'}.'/') eq lc($channel)) {
+			foreach my $trigger_channel (split(/ /,$trigger->{'channels'})) {
+				if (lc($channelname) eq lc($trigger_channel)
+				  || lc($server->{'tag'}.'/'.$channelname) eq lc($trigger_channel)
+				  || lc($server->{'tag'}.'/') eq lc($trigger_channel)) {
 					$matches = 1;
 					last; # this channel matches, stop checking channels
 				}
@@ -244,20 +293,21 @@ sub check_signal_message {
 			}
 		}
 		# check the mask
-		if ($trigger->{'masks'} && ($paramnick == -1 || $paramaddress == -1 || !$server->masks_match($trigger->{'masks'}, $signal->[$paramnick], $signal->[$paramaddress]))) {
+		if ($trigger->{'masks'} && (!defined($nickname) || !defined($address) || !defined($server) || !$server->masks_match($trigger->{'masks'}, $nickname, $address))) {
 			next; # this trigger doesn't match
 
 		}
 		# check hasmodes
 		if ($trigger->{'hasmode'}) {
-			my ($channel, $nick);
-			( $paramchannel != -1
-			  and $paramnick != -1
-			  and $channel = $server->channel_find($signal->[$paramchannel])
-			  and $nick = $channel->nick_find($signal->[$paramnick])
+			my ($channelrec, $nickrec);
+			( defined($channelname)
+			  and defined($nickname)
+			  and defined($server)
+			  and $channelrec = $server->channel_find($channelname)
+			  and $nickrec = $channelrec->nick_find($nickname)
 			) or next;
 
-			my $modes = ($nick->{'op'}?'o':'').($nick->{'voice'}?'v':'').($nick->{'halfop'}?'h':'');
+			my $modes = ($nickrec->{'op'}?'o':'').($nickrec->{'voice'}?'v':'').($nickrec->{'halfop'}?'h':'');
 			if (!check_modes($modes,$trigger->{'hasmode'})) {
 				next;
 			}	
@@ -265,11 +315,10 @@ sub check_signal_message {
 
 		# check hasflags
 		if ($trigger->{'hasflag'}) {
-			my $channel = ($paramchannel == -1) ? undef : $signal->[$paramchannel];
-			if ($paramnick == -1 || $paramaddress == -1) {
+			if (!defined($nickname) || !defined($address) || !defined($server)) {
 				next;
 			}
-			my $flags = get_flags ($server->{'chatnet'},$channel,$signal->[$paramnick],$signal->[$paramaddress]);
+			my $flags = get_flags ($server->{'chatnet'},$channelname,$nickname,$address);
 			if (!defined($flags)) {
 				next;
 			}
@@ -284,12 +333,12 @@ sub check_signal_message {
 		# if we got this far, it fully matched, and we need to do the replace/command/stop/once
 		my $expands = {
 			'M' => $message,
-			'T' => $server->{'tag'},
-			'C' => (($paramchannel == -1) ? '' : $signal->[$paramchannel]),
-			'N' => (($paramnick == -1) ? '' : $signal->[$paramnick]),
-			'A' => (($paramaddress == -1) ? '' : $signal->[$paramaddress]),
-			'I' => (($paramaddress == -1) ? '' : substr($signal->[$paramaddress],0,index($signal->[$paramaddress],'@'))),
-			'H' => (($paramaddress == -1) ? '' : substr($signal->[$paramaddress],index($signal->[$paramaddress],'@')+1)),
+			'T' => (defined($server)) ? $server->{'tag'} : '',
+			'C' => $channelname,
+			'N' => $nickname,
+			'A' => $address,
+			'I' => ((!defined($address)) ? '' : substr($address,0,index($address,'@'))),
+			'H' => ((!defined($address)) ? '' : substr($address,index($address,'@')+1)),
 			'$' => '$',
 			';' => "\x00"
 		};
@@ -303,16 +352,24 @@ sub check_signal_message {
 			my $command = $trigger->{'command'};
 			# $1 = the stuff behind the $ we want to expand: a number, or a character from %expands
 			$command = do_expands($command, $expands, $message);
-				
-			if ($paramchannel!=-1 && $server->channel_find($signal->[$paramchannel])) {
-				$context = $server->channel_find($signal->[$paramchannel]);
+			
+			if (defined($server)) {
+				if (defined($channelname) && $server->channel_find($channelname)) {
+					$context = $server->channel_find($channelname);
+				} else {
+					$context = $server;
+				}
 			} else {
-				$context = $server;
+				$context = undef;
 			}
 			
 			foreach my $commandpart (split /\x00/,$command) {
 				$commandpart =~ s/^ +//;  # remove spaces in front
-				$context->command($commandpart);
+				if (defined($context)) {
+					$context->command($commandpart);
+				} else {
+					Irssi::command($commandpart);
+				}
 			}
 		}
 		
@@ -335,6 +392,7 @@ sub check_signal_message {
 		$signal->[$parammessage] = $message;
 		signal_continue(@$signal);
 	}
+	$recursion_depth--;
 }
 
 # used in check_signal_message to expand $'s
@@ -461,7 +519,7 @@ sub compile_trigger {
 sub rebuild {
 	%triggers_by_type = ();
 	foreach my $trigger (@triggers) {
-		foreach my $type (@trigger_all_switches) {
+		foreach my $type (@trigger_types) {
 			if ($trigger->{$type}) {
 				push @{$triggers_by_type{$type}}, ($trigger);
 			}
@@ -522,7 +580,7 @@ sub cmd_load {
 	my $io = new IO::File $filename, "r";
 	if (not defined $io) {
 		if (-e $filename) {
-			Irssi::print "error opening triggers file";
+			Irssi::print("Error opening triggers file", MSGLEVEL_CLIENTERROR);
 		}
 		return;
 	}
@@ -707,19 +765,19 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 		}
 	}
 	
-	if (defined($trigger->{'replace'}) && ! $trigger->{'regexp'}) {
-		Irssi::print("Error: Can't have -replace without -regexp");
+	if (defined($trigger->{'replace'}) && ! $trigger->{'regexp'} && !$trigger->{'pattern'}) {
+		Irssi::print("Trigger error: Can't have -replace without -regexp", MSGLEVEL_CLIENTERROR);
 		return undef;
 	}
 
 	if ($trigger->{'pattern'} && $trigger->{'regexp'}) {
-		Irssi::print("Error: Can't have -pattern and -regexp in same trigger");
+		Irssi::print("Trigger error: Can't have -pattern and -regexp in same trigger", MSGLEVEL_CLIENTERROR);
 		return undef;
 	}
 
 	# check if it has at least one type
 	my $has_a_type;
-	foreach my $type (@trigger_all_switches) {
+	foreach my $type (@trigger_types) {
 		if ($trigger->{$type}) {
 			$has_a_type = 1;
 			last;
