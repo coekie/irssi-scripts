@@ -103,21 +103,6 @@ my @triggers; # array of all triggers
 my %triggers_by_type; # hash mapping types on triggers of that type
 my $recursion_depth = 0;
 
-# trigger types in -all option
-my @trigger_all_switches = ('publics','privmsgs','pubactions','privactions','pubnotices','privnotices','joins','parts','quits','kicks','topics','invites');
-# all trigger types
-my @trigger_types = @trigger_all_switches;
-push @trigger_types, 'rawin', 'send_command', 'send_text', 'beep', 'mode_channel';
-#list of all switches
-my @trigger_switches = @trigger_types;
-push @trigger_switches, 'nocase', 'stop','once';
-#parameters (with an argument)
-my @trigger_params = ('masks','channels','tags','pattern','regexp','command','replace','hasmode','hasflag');
-#list of all options (including switches)
-my @trigger_options = ('all');
-push @trigger_options, @trigger_switches;
-push @trigger_options, @trigger_params;
-
 ###############
 ### formats ###
 ###############
@@ -279,6 +264,39 @@ sub sig_send_text_or_command {
 
 }
 
+my %filters = (
+'mode_type' => {
+	'types' => ['mode_channel'],
+	'sub' => sub {
+		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
+		return (($param) eq $extra->{'mode_type'});
+	}
+},
+'mode_char' => {
+	'types' => ['mode_channel'],
+	'sub' => sub {
+		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
+		return (($param) eq $extra->{'mode_char'});
+	}
+}
+);
+
+# trigger types in -all option
+my @trigger_all_switches = ('publics','privmsgs','pubactions','privactions','pubnotices','privnotices','joins','parts','quits','kicks','topics','invites');
+# all trigger types
+my @trigger_types = @trigger_all_switches;
+push @trigger_types, 'rawin', 'send_command', 'send_text', 'beep', 'mode_channel';
+# list of all switches
+my @trigger_switches = @trigger_types;
+push @trigger_switches, 'nocase', 'stop','once';
+# parameters (with an argument)
+my @trigger_params = ('masks','channels','tags','pattern','regexp','command','replace','hasmode','hasflag');
+# list of all options (including switches)
+my @trigger_options = ('all');
+push @trigger_options, @trigger_switches;
+push @trigger_options, @trigger_params;
+push @trigger_options, keys(%filters); 
+
 # check the triggers on $signal's $parammessage parameter, for triggers with $condition set
 #  on $server in $channelname, for $nickname!$address
 # set $parammessage to -1 if the signal doesn't have a message
@@ -286,7 +304,6 @@ sub sig_send_text_or_command {
 sub check_signal_message {
 	my ($signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
 	my ($trigger, $changed, $stopped, $context, $need_rebuild);
-	#my $server = $signal->[0];
 	my $message = ($parammessage == -1) ? '' : $signal->[$parammessage];
 
 	return if (!$triggers_by_type{$condition});
@@ -296,7 +313,8 @@ sub check_signal_message {
 		return;
 	}
 	$recursion_depth++;
-	
+
+TRIGGER:	
 	for (my $index=0;$index < scalar(@{$triggers_by_type{$condition}});$index++) { 
 		my $trigger = $triggers_by_type{$condition}->[$index];
 		if (!$trigger->{$condition}) {
@@ -367,6 +385,15 @@ sub check_signal_message {
 			}
 			if (!check_modes($flags,$trigger->{'hasflag'})) {
 				next;
+			}
+		}
+		
+		# check filters
+		foreach my $trigfilter (@{$trigger->{'filters'}}) {
+			print "DEBUG: checking filter " . $trigfilter->[0];
+			# TODO save reference to filter directly into trigger... but then we can't use Dumper for saving
+			if (! $filters{$trigfilter->[0]}->{'sub'}($trigfilter->[1], $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) ) {
+				next TRIGGER;
 			}
 		}
 		
@@ -601,10 +628,6 @@ sub rebuild {
 	}
 }
 
-command_bind('trigger test', sub {
-	print Dumper(scalar(@{$triggers_by_type{'publics'}}));
-});
-
 ################################
 ### manage the triggers-list ###
 ################################
@@ -719,6 +742,10 @@ sub to_string {
 			}
 		}
 	}
+	
+	foreach my $trigfilter (@{$trigger->{'filters'}}) {
+		$string .= '-' . $trigfilter->[0] . " '$trigfilter->[1]' ";
+	}
 
 	foreach my $param (@trigger_params) {
 		if ($trigger->{$param} || ($param eq 'replace' && defined($trigger->{'replace'}))) {
@@ -830,6 +857,11 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 				$trigger->{$switch} = undef;
 				next ARGS;
 			}
+		}
+		
+		if ($filters{$option}) {
+			push @{$trigger->{'filters'}}, [$option, shift @args];
+			next ARGS;
 		}
 	}
 	
