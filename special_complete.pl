@@ -1,7 +1,7 @@
 use strict;
 use vars qw($VERSION %IRSSI);
 use Irssi;
-$VERSION = '1.0';
+$VERSION = '1.1';
 %IRSSI = (
 	authors  	=> 'Wouter Coekaerts',
 	contact  	=> 'wouter@coekaerts.be, coekie@#irssi',
@@ -18,6 +18,8 @@ Irssi::signal_add_last 'complete word', sub {
 		my $evaluated;
 		if (Irssi::active_win->{'active'}) {
 			$evaluated = Irssi::active_win->{'active'}->parse_special($word);
+		} elsif (Irssi::active_win->{'active_server'}) {
+			$evaluated = Irssi::active_win->{'active_server'}->parse_special($word);
 		} else {
 			$evaluated = Irssi::parse_special($word);
 		}
