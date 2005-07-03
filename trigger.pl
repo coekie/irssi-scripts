@@ -704,6 +704,7 @@ sub cmd_load {
 		return;
 	}
 	if (defined $io) {
+		@triggers = ();
 		my $text;
 		$text = $io->getline;
 		my $file_version = '';
