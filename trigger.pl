@@ -424,17 +424,16 @@ TRIGGER:
 		next if ($trigger->{'compregexp'} && ($parammessage == -1 || $message !~ m/$trigger->{'compregexp'}/));
 		
 		# if we got this far, it fully matched, and we need to do the replace/command/stop/once
-		my $expands = {
-			'M' => $message,
-			'T' => (defined($server)) ? $server->{'tag'} : '',
-			'C' => $channelname,
-			'N' => $nickname,
-			'A' => $address,
-			'I' => ((!defined($address)) ? '' : substr($address,0,index($address,'@'))),
-			'H' => ((!defined($address)) ? '' : substr($address,index($address,'@')+1)),
-			'$' => '$',
-			';' => ";"
-		};
+		my $expands = $extra;
+		$expands->{'M'} = $message,;
+		$expands->{'T'} = (defined($server)) ? $server->{'tag'} : '';
+		$expands->{'C'} = $channelname;
+		$expands->{'N'} = $nickname;
+		$expands->{'A'} = $address;
+		$expands->{'I'} = ((!defined($address)) ? '' : substr($address,0,index($address,'@')));
+		$expands->{'H'} = ((!defined($address)) ? '' : substr($address,index($address,'@')+1));
+		$expands->{'$'} = '$';
+		$expands->{';'} = ';';
 
 		if (defined($trigger->{'replace'})) { # it's a -replace
 			$message =~ s/$trigger->{'compregexp'}/do_expands($trigger->{'compreplace'},$expands,$message)/ge;
@@ -503,7 +502,7 @@ sub do_expands {
 	my @plus = @+;
 	my @min = @-;
 	my $p = \@plus; my $m = \@min;
-	$inthis =~ s/\$(\\*(\d+|[^0-9x]|x[0-9a-fA-F][0-9a-fA-F]))/expand_and_escape($1,$expands,$m,$p,$from)/ge;	
+	$inthis =~ s/\$(\\*(\d+|[^0-9x{]|x[0-9a-fA-F][0-9a-fA-F]|{.*?}))/expand_and_escape($1,$expands,$m,$p,$from)/ge;	
 	return $inthis;
 }
 
@@ -516,7 +515,7 @@ sub expand_and_escape {
 
 # used in do_expands (via expand_and_escape), to_expand is the part after the $
 sub expand {
-	my ($to_expand,$expands,$min,$plus,$from) = @_;
+	my ($to_expand, $expands, $min, $plus, $from) = @_;
 	if ($to_expand =~ /^\d+$/) { # a number => look up in $vars
 		# from man perlvar:
 		# $3 is the same as "substr $var, $-[3], $+[3] - $-[3])"
@@ -525,8 +524,10 @@ sub expand {
 		my $exp = expand($to_expand,$expands,$min,$plus,$from); # first expand without \
 		$exp =~ s/([^a-zA-Z0-9])/\\\1/g; # escape non-word chars
 		return $exp;
-	} elsif ($to_expand =~ /x([0-9a-fA-F]{2})/) { # $xAA
+	} elsif ($to_expand =~ /^x([0-9a-fA-F]{2})/) { # $xAA
 		return chr(hex($1));
+	} elsif ($to_expand =~ /^{(.*?)}$/) { # ${foo}
+		return expand($1, $expands, $min, $plus, $from);
 	} else { # look up in $expands
 		return $expands->{$to_expand};
 	}
