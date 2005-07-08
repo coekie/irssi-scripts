@@ -233,8 +233,6 @@ my @signals = (
 		foreach my $char (split(//,$modes)) {
 			if ($char eq "+" || $char eq "-") {
 				$type = $char;
-#			} elsif ($char =~ /[Oovh]/) { # mode_nick
-#				$pos++;
 			} else {
 				if ($char =~ /[Oovh]/) { # mode_nick
 					$event_type = 'mode_nick';
@@ -242,7 +240,7 @@ my @signals = (
 				} elsif ($char =~ /[beIqdk]/ || ( $char =~ /[lfJ]/ && $type eq '+')) { # chan_mode with arg
 					$event_type = 'mode_channel';
 					$arg = $modeargs[$pos++];
-				} else {
+				} else { # chan_mode without arg
 					$event_type = 'mode_channel';
 					$arg = undef;
 				}
@@ -273,6 +271,32 @@ my @signals = (
 	'signal' => 'notifylist away changed',
 	'sub' => sub {check_signal_message(\@_, 5, $_[0], undef, $_[1], $_[2].'@'.$_[3], ($_[5] ? 'notify_away' : 'notify_unaway'), {'realname' => $_[4]});}
 },
+# "ctcp msg", SERVER_REC, char *args, char *nick, char *addr, char *target
+{
+	'types' => ['pubctcps', 'privctcps'],
+	'signal' => 'ctcp msg',
+	'sub' => sub {
+		my ($server, $args, $nick, $addr, $target) = @_;
+		if ($target eq $server->{'nick'}) {
+			check_signal_message(\@_, 1, $server, undef, $nick, $addr, 'privctcps');
+		} else {
+			check_signal_message(\@_, 1, $server, $target, $nick, $addr, 'pubctcps');
+		}
+	}
+},
+# "ctcp reply", SERVER_REC, char *args, char *nick, char *addr, char *target
+{
+	'types' => ['pubctcpreplies', 'privctcpreplies'],
+	'signal' => 'ctcp reply',
+	'sub' => sub {
+		my ($server, $args, $nick, $addr, $target) = @_;
+		if ($target eq $server->{'nick'}) {
+			check_signal_message(\@_, 1, $server, undef, $nick, $addr, 'privctcps');
+		} else {
+			check_signal_message(\@_, 1, $server, $target, $nick, $addr, 'pubctcps');
+		}
+	}
+}
 );
 
 sub sig_send_text_or_command {
@@ -382,7 +406,7 @@ my %filters = (
 );
 
 # trigger types in -all option
-my @trigger_all_switches = qw(publics privmsgs pubactions privactions pubnotices privnotices joins parts quits kicks topics invites);
+my @trigger_all_switches = qw(publics privmsgs pubactions privactions pubnotices privnotices pubctcps privctcps pubctcpreplies privctcpreplies joins parts quits kicks topics invites);
 # all trigger types
 my @trigger_types = (@trigger_all_switches, qw(rawin send_command send_text beep mode_channel mode_nick notify_join notify_part notify_away notify_unaway notify_unidle));
 # list of all switches
