@@ -68,7 +68,7 @@ What to do when it matches:
      -replace: replaces the matching part with <replace> in your irssi (requires a <regexp>)
      -once: remove the trigger if it is triggered, so it only executes once and then is forgotten.
      -stop: stops the signal. It won't get displayed by Irssi. Like /IGNORE
-     
+
 Examples:
  Knockout people who do a !list:
    /TRIGGER ADD -publics -channels "#channel1 #channel2" -nocase -regexp ^!list -command "KN $N This is not a warez channel!"
@@ -78,7 +78,7 @@ Examples:
    /TRIGGER ADD -publics -actions -channels "#channel" -hasmode '-o' -stop
  Send a mail to yourself every time a topic is changed:
    /TRIGGER ADD -topics -command 'exec echo $\N changed topic of $\C to: $\M | mail you@somewhere.com -s topic'
- 
+
 
 Examples with -replace:
  Replace every occurence of shit with sh*t, case insensitive:
@@ -222,26 +222,31 @@ my @signals = (
 },
 # "event "<cmd>, SERVER_REC, char *args, char *sender_nick, char *sender_address
 {
-	'types' => ['mode_channel'],
+	'types' => ['mode_channel', 'mode_nick'],
 	'signal' => 'event mode',
 	'sub' => sub {
-		my ($server, $args, $nickname, $address) = @_;
-		my ($target, $modes, $modeargs) = split(/ /, $args, 3);
+		my ($server, $event_args, $nickname, $address) = @_;
+		my ($target, $modes, $modeargs) = split(/ /, $event_args, 3);
 		return if (!$server->ischannel($target));
 		my (@modeargs) = split(/ /,$modeargs);
-		my ($pos, $type, $modearg) = (0, '+');
+		my ($pos, $type, $event_type, $arg) = (0, '+');
 		foreach my $char (split(//,$modes)) {
 			if ($char eq "+" || $char eq "-") {
 				$type = $char;
-			} elsif ($char =~ /[Oovh]/) { # mode_nick
-				$pos++;
-			} else {				
-				if ($char =~ /[beIqdk]/ || ( $char =~ /[lfJ]/ && $type eq '+')) {
-					$modearg = $modeargs[$pos++];
+#			} elsif ($char =~ /[Oovh]/) { # mode_nick
+#				$pos++;
+			} else {
+				if ($char =~ /[Oovh]/) { # mode_nick
+					$event_type = 'mode_nick';
+					$arg = $modeargs[$pos++];
+				} elsif ($char =~ /[beIqdk]/ || ( $char =~ /[lfJ]/ && $type eq '+')) { # chan_mode with arg
+					$event_type = 'mode_channel';
+					$arg = $modeargs[$pos++];
 				} else {
-					$modearg = undef;
+					$event_type = 'mode_channel';
+					$arg = undef;
 				}
-				check_signal_message(\@_,-1,$server,$target,$nickname,$address,'mode_channel',{ 'mode_type' => $type, 'mode_char' => $char, 'mode_arg' => $modearg});
+				check_signal_message(\@_,-1,$server,$target,$nickname,$address,$event_type,{ 'mode_type' => $type, 'mode_char' => $char, 'mode_arg' => $arg});
 			}
 		}
 	}
@@ -361,14 +366,14 @@ my %filters = (
 	}
 },
 'mode_type' => {
-	'types' => ['mode_channel'],
+	'types' => ['mode_channel', 'mode_nick'],
 	'sub' => sub {
 		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
 		return (($param) eq $extra->{'mode_type'});
 	}
 },
 'mode_char' => {
-	'types' => ['mode_channel'],
+	'types' => ['mode_channel', 'mode_nick'],
 	'sub' => sub {
 		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
 		return (($param) eq $extra->{'mode_char'});
@@ -379,7 +384,7 @@ my %filters = (
 # trigger types in -all option
 my @trigger_all_switches = qw(publics privmsgs pubactions privactions pubnotices privnotices joins parts quits kicks topics invites);
 # all trigger types
-my @trigger_types = (@trigger_all_switches, qw(rawin send_command send_text beep mode_channel notify_join notify_part notify_away notify_unaway notify_unidle));
+my @trigger_types = (@trigger_all_switches, qw(rawin send_command send_text beep mode_channel mode_nick notify_join notify_part notify_away notify_unaway notify_unidle));
 # list of all switches
 my @trigger_switches = (@trigger_types, qw(nocase stop once debug));
 # parameters (with an argument)
