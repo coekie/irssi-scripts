@@ -5,7 +5,7 @@ use strict;
 use IO::Handle; # for (auto)flush
 use Fcntl; # for sysopen
 use vars qw($VERSION %IRSSI);
-$VERSION = '0.4.5+';
+$VERSION = '0.4.6+';
 %IRSSI = (
 	authors     => 'Wouter Coekaerts',
 	contact     => 'coekie@irssi.org',
@@ -207,11 +207,19 @@ sub screen_size {
 		close(TTY);
 		($row, $col, $xpixel, $ypixel) = unpack('S4', $winsize);
 	}
+	
 	# set screen width
 	$irssi_width = $col-$nicklist_width-1;
 	$height = $row-1;
-	system 'screen -x '.$ENV{'STY'}.' -X width -w ' . $irssi_width;
-	Irssi::timeout_add_once(1000,sub {$screen_resizing = 0; redraw()}, []);
+	
+	# on some recent systems, "screen -X fit; screen -X width -w 50" doesn't work, needs a sleep in between the 2 commands
+	# so we wait a second before setting the width
+	Irssi::timeout_add_once(1000, sub {
+		my ($new_irssi_width) = @_;
+		system 'screen -x '.$ENV{'STY'}.' -X width -w ' . $new_irssi_width;
+		# and then we wait another second for the resizing, and then redraw.
+		Irssi::timeout_add_once(1000,sub {$screen_resizing = 0; redraw()}, []);
+	}, $irssi_width);
 }
 
 sub sig_terminal_resized {

@@ -22,7 +22,7 @@ sub sendbacklog {
 	foreach my $channel ($server->channels) {
 		my $window = $server->window_find_item($channel->{'name'});
 		for (my $line = $window->view->get_lines; defined($line); $line = $line->next) {
-			Irssi::signal_emit('server incoming', $server,':proxy NOTICE ' . $channel->{'name'} .' :' . $line->get_text(1));
+			Irssi::signal_emit('server incoming', $server,':proxy NOTICE ' . $channel->{'name'} .' :' . $line->get_text(0));
 		}
 	}
 	Irssi::signal_emit('server incoming', $server,':proxy NOTICE * :End of backlog');
