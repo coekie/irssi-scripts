@@ -402,6 +402,13 @@ my %filters = (
 		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
 		return (($param) eq $extra->{'mode_char'});
 	}
+},
+'mode_arg' => {
+	'types' => ['mode_channel', 'mode_nick'],
+	'sub' => sub {
+		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
+		return (($param) eq $extra->{'mode_arg'});
+	}
 }
 );
 
