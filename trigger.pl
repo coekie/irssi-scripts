@@ -1018,6 +1018,7 @@ sub cmd_move {
 		$newindex -= 1; # array starts counting from 0
 		my $trigger = splice (@triggers,$index,1); # remove from old place
 		splice (@triggers,$newindex,0,($trigger)); # insert at new place
+		rebuild();
 	}
 }
 
