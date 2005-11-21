@@ -695,6 +695,12 @@ sub rebuild {
 ### manage the triggers-list ###
 ################################
 
+my $trigger_file; # cached setting
+
+sub sig_setup_changed {
+	$trigger_file = Irssi::settings_get_str('trigger_file');
+}
+
 # TRIGGER SAVE
 sub cmd_save {
 	#my $filename = Irssi::settings_get_str('trigger_file');
@@ -707,8 +713,7 @@ sub cmd_save {
 	#	$io->close;
 	#}
 	
-	my $filename = Irssi::settings_get_str('trigger_file');
-	my $io = new IO::File $filename, "w";
+	my $io = new IO::File $trigger_file, "w";
 	if (defined $io) {
 		$io->print("#Triggers file version $VERSION\n");
 		foreach my $trigger (@triggers) {
@@ -716,24 +721,21 @@ sub cmd_save {
 		}
 		$io->close;
 	}
-	Irssi::printformat(MSGLEVEL_CLIENTNOTICE, 'trigger_saved', $filename);
+	Irssi::printformat(MSGLEVEL_CLIENTNOTICE, 'trigger_saved', $trigger_file);
 }
 
 # save on unload
-sub sig_command_script_unload {
-	my $script = shift;
-	if ($script =~ /(.*\/)?$IRSSI{'name'}(\.pl)? *$/) {
-		cmd_save();
-	}
+sub UNLOAD {
+	cmd_save();
 }
 
 # TRIGGER LOAD
 sub cmd_load {
+	sig_setup_changed(); # make sure we've read the trigger_file setting
 	my $converted = 0;
-	my $filename = Irssi::settings_get_str('trigger_file');
-	my $io = new IO::File $filename, "r";
+	my $io = new IO::File $trigger_file, "r";
 	if (not defined $io) {
-		if (-e $filename) {
+		if (-e $trigger_file) {
 			Irssi::print("Error opening triggers file", MSGLEVEL_CLIENTERROR);
 		}
 		return;
@@ -809,7 +811,7 @@ sub cmd_load {
 			}
 		}
 	}
-	Irssi::printformat(MSGLEVEL_CLIENTNOTICE, 'trigger_loaded', $filename);
+	Irssi::printformat(MSGLEVEL_CLIENTNOTICE, 'trigger_loaded', $trigger_file);
 	if ($converted) {
 		Irssi::print("Trigger: Triggers file will be in new format next time it's saved.");
 	}
@@ -1058,9 +1060,8 @@ signal_add_first 'default command trigger' => sub {
 	cmd_help();
 };
 
-Irssi::signal_add_first('command script load', 'sig_command_script_unload');
-Irssi::signal_add_first('command script unload', 'sig_command_script_unload');
 Irssi::signal_add('setup saved', 'cmd_save');
+Irssi::signal_add('setup changed', 'sig_setup_changed');
 
 # This makes tab completion work
 Irssi::command_set_options('trigger add',join(' ',@trigger_options));

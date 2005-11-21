@@ -104,14 +104,9 @@ signal_add_first("gui key pressed", sub {
 	}
 });
 
-sub sig_command_script_unload {
-	my $script = shift;
-	if ($script =~ /(.*\/)?$IRSSI{'name'}(\.pl)? *$/) {
-		print STDERR "\e[?1000l"; # stop tracking
-	}
+sub UNLOAD {
+	print STDERR "\e[?1000l"; # stop tracking
 }
-Irssi::signal_add_first('command script load', 'sig_command_script_unload');
-Irssi::signal_add_first('command script unload', 'sig_command_script_unload');
 
 if ($ENV{"TERM"} !~ /^rxvt|screen|xterm(-color)?$/) {
 	die "Your terminal doesn't seem to support this.";
