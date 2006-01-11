@@ -420,8 +420,10 @@ my @trigger_types = (@trigger_all_switches, qw(rawin send_command send_text beep
 my @trigger_switches = (@trigger_types, qw(nocase stop once debug));
 # parameters (with an argument)
 my @trigger_params = qw(pattern regexp command replace);
-# list of all options (including switches)
-my @trigger_options = ('all', @trigger_switches, @trigger_params, keys(%filters)); 
+# list of all options (including switches) for /TRIGGER ADD
+my @trigger_add_options = ('all', @trigger_switches, @trigger_params, keys(%filters));
+# same for /TRIGGER CHANGE, this includes the -no<option>'s
+my @trigger_options = map(($_,'no'.$_) ,@trigger_add_options);
 
 # check the triggers on $signal's $parammessage parameter, for triggers with $condition set
 #  on $server in $channelname, for $nickname!$address
@@ -941,17 +943,22 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 			return undef;
 		}
 
-		# -<param> <value>
+		# -<param> <value> or -no<param>
 		foreach my $param (@trigger_params) {
 			if ($option eq $param) {
 				$trigger->{$param} = shift @args;
 				next ARGS;
 			}
+			if ($option eq 'no'.$param) {
+				$trigger->{$param} = undef;
+				next ARGS;
+			}
 		}
-		# -all
-		if ($option eq 'all') {
+		# -[no]all
+		if ($option eq 'all' || $option eq 'noall') {
+			my $on_or_off = ($option eq 'all') ? 1 : undef;
 			foreach my $switch (@trigger_all_switches) {
-				$trigger->{$switch} = 1;
+				$trigger->{$switch} = $on_or_off;
 			}
 			next ARGS;
 		}
@@ -970,9 +977,17 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 			}
 		}
 		
+		# -<filter> <value>
 		if ($filters{$option}) {
 			push @{$trigger->{'filters'}}, [$option, shift @args, $filters{$option}->{'sub'}];
 			next ARGS;
+		}
+		
+		# -<nofilter>
+		if ($option =~ /^no(.*)$/ && $filters{$1}) {
+			my $filter = $1;
+			# the new filters are the old grepped for everything except ones with name $filter
+			@{$trigger->{'filters'}} = grep( $_->[0] ne $filter, @{$trigger->{'filters'}} );
 		}
 	}
 	
@@ -1074,7 +1089,7 @@ Irssi::signal_add('setup saved', 'cmd_save');
 Irssi::signal_add('setup changed', 'sig_setup_changed');
 
 # This makes tab completion work
-Irssi::command_set_options('trigger add',join(' ',@trigger_options));
+Irssi::command_set_options('trigger add',join(' ',@trigger_add_options));
 Irssi::command_set_options('trigger change',join(' ',@trigger_options));
 
 Irssi::settings_add_str($IRSSI{'name'}, 'trigger_file', Irssi::get_irssi_dir()."/triggers");
