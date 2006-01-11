@@ -818,6 +818,16 @@ sub cmd_load {
 	rebuild();
 }
 
+# escape for printing with to_string
+# param_to_string <<abc'def>> = << 'abc'\''def' >>
+sub param_to_string {
+	my ($text) = @_;
+	# "'" signs without a (odd number of) \ in front of them, need be to escaped as '\''
+	# this is ugly :(
+	$text =~ s/(^|[^\\](\\\\)*)'/$1'\\''/g;
+	return " '$text' ";
+}
+
 # converts a trigger back to "-switch -options 'foo'" form
 # if $compat, $trigger is in the old format (used to convert)
 sub to_string {
@@ -845,18 +855,18 @@ sub to_string {
 	if ($compat) {
 		foreach my $filter (keys(%filters)) {
 			if ($trigger->{$filter}) {
-				$string .= '-' . $filter . " '$trigger->{$filter}'".' ';
+				$string .= '-' . $filter . param_to_string($trigger->{$filter});
 			}
 		}
 	} else {
 		foreach my $trigfilter (@{$trigger->{'filters'}}) {
-			$string .= '-' . $trigfilter->[0] . " '$trigfilter->[1]' ";
+			$string .= '-' . $trigfilter->[0] . param_to_string($trigfilter->[1]);
 		}
 	}
 
 	foreach my $param (@trigger_params) {
 		if ($trigger->{$param} || ($param eq 'replace' && defined($trigger->{'replace'}))) {
-			$string .= '-' . $param . " '$trigger->{$param}'".' ';
+			$string .= '-' . $param . param_to_string($trigger->{$param});
 		}
 	}
 	return $string;
