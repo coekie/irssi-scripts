@@ -192,6 +192,12 @@ my @signals = (
 	'signal' => 'message invite',
 	'sub' => sub {check_signal_message(\@_,-1,$_[0],$_[1],$_[2],$_[3],'invites');}
 },
+# "message nick", SERVER_REC, char *newnick, char *oldnick, char *address
+{
+	'types' => ['nick_changes'],
+	'signal' => 'message nick',
+	'sub' => sub {check_signal_message(\@_,-1,$_[0],undef,$_[1],$_[3],'nick_changes');}
+},
 # "server incoming", SERVER_REC, char *data
 {
 	'types' => ['rawin'],
@@ -413,7 +419,7 @@ my %filters = (
 );
 
 # trigger types in -all option
-my @trigger_all_switches = qw(publics privmsgs pubactions privactions pubnotices privnotices pubctcps privctcps pubctcpreplies privctcpreplies joins parts quits kicks topics invites);
+my @trigger_all_switches = qw(publics privmsgs pubactions privactions pubnotices privnotices pubctcps privctcps pubctcpreplies privctcpreplies joins parts quits kicks topics invites nick_changes);
 # all trigger types
 my @trigger_types = (@trigger_all_switches, qw(rawin send_command send_text beep mode_channel mode_nick notify_join notify_part notify_away notify_unaway notify_unidle));
 # list of all switches
