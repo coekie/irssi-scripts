@@ -85,6 +85,10 @@ What to do when it matches:
      -once: remove the trigger if it is triggered, so it only executes once and then is forgotten.
      -stop: stops the signal. It won't get displayed by Irssi. Like /IGNORE
 
+Other options:
+     -disabled: Same as removing it, but keeps it in case you might need it later
+     -name: Give the trigger a name. You can refer to the trigger with this name in add/del/change commands
+
 Examples:
  Knockout people who do a !list:
    /TRIGGER ADD -publics -channels "#channel1 #channel2" -nocase -regexp ^!list -command "KN $N This is not a warez channel!"
@@ -478,9 +482,9 @@ my @trigger_all_switches = qw(publics privmsgs pubactions privactions pubnotices
 # all trigger types
 my @trigger_types = (@trigger_all_switches, qw(rawin send_command send_text beep mode_channel mode_nick notify_join notify_part notify_away notify_unaway notify_unidle));
 # list of all switches
-my @trigger_switches = (@trigger_types, qw(nocase stop once debug));
+my @trigger_switches = (@trigger_types, qw(nocase stop once debug disabled));
 # parameters (with an argument)
-my @trigger_params = qw(pattern regexp command replace);
+my @trigger_params = qw(pattern regexp command replace name);
 # list of all options (including switches) for /TRIGGER ADD
 my @trigger_add_options = ('all', @trigger_switches, @trigger_params, keys(%filters));
 # same for /TRIGGER CHANGE, this includes the -no<option>'s
@@ -731,7 +735,7 @@ sub rebuild {
 	%triggers_by_type = ();
 	foreach my $trigger (@triggers) {
 		foreach my $type (@trigger_types) {
-			if ($trigger->{$type}) {
+			if ($trigger->{$type} && !$trigger->{'disabled'}) {
 				push @{$triggers_by_type{$type}}, ($trigger);
 			}
 		}
@@ -882,9 +886,15 @@ sub cmd_load {
 }
 
 # escape for printing with to_string
-# param_to_string <<abc'def>> = << 'abc'\''def' >>
+# <<abcdef>>      => << 'abcdef' >>
+# <<abc'def>>     => << "abc'def" >>
+# <<abc'def\x02>> => << 'abc'\''def\x02' >>
 sub param_to_string {
 	my ($text) = @_;
+	# avoid ugly escaping if we can use "-quotes without other escaping (no " or \)
+	if ($text =~ /^[^"\\]*'[^"\\]$/) {
+		return ' "' . $text . '" ';
+	}
 	# "'" signs without a (odd number of) \ in front of them, need be to escaped as '\''
 	# this is ugly :(
 	$text =~ s/(^|[^\\](\\\\)*)'/$1'\\''/g;
@@ -940,6 +950,12 @@ sub find_trigger {
 	my ($data) = @_;
 	if ($data =~ /^[0-9]*$/ and defined($triggers[$data-1])) {
 		return $data-1;
+	} else {
+		for (my $i=0; $i < scalar(@triggers); $i++) {
+			if ($triggers[$i]->{'name'} eq $data) {
+				return $i;
+			}
+		}
 	}
 	Irssi::printformat(MSGLEVEL_CLIENTCRAP, 'trigger_not_found', $data);
 	return -1; # not found
