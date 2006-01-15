@@ -1112,7 +1112,7 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 	foreach my $type (@trigger_types) {
 		if ($trigger->{$type}) {
 			foreach my $filter (@{$trigger->{'filters'}}) {
-				if (!grep {$_ eq $type} $filters{$filter->[0]}->{'types'}) {
+				if (!grep {$_ eq $type} @{$filters{$filter->[0]}->{'types'}}) {
 					Irssi::print("Warning: the filter -" . $filter->[0] . " can't apply to an event of type -$type, so I'm removing that type from this trigger.");
 					delete $trigger->{$type};
 				}
