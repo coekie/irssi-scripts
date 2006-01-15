@@ -142,6 +142,7 @@ SCRIPTHELP_EOF
 my @triggers; # array of all triggers
 my %triggers_by_type; # hash mapping types on triggers of that type
 my $recursion_depth = 0;
+my $changed_since_last_save = 0;
 
 ###############
 ### formats ###
@@ -636,6 +637,7 @@ TRIGGER:
 
 	if ($need_rebuild) {
 		rebuild();
+		$changed_since_last_save = 1;
 	}
 	if ($stopped) { # stopped with -stop
 		signal_stop();
@@ -833,6 +835,10 @@ sub sig_setup_changed {
 	$trigger_file = Irssi::settings_get_str('trigger_file');
 }
 
+sub autosave {
+	cmd_save() if ($changed_since_last_save);
+}
+
 # TRIGGER SAVE
 sub cmd_save {
 	my $io = new IO::File $trigger_file, "w";
@@ -844,6 +850,7 @@ sub cmd_save {
 		$io->close;
 	}
 	Irssi::printformat(MSGLEVEL_CLIENTNOTICE, 'trigger_saved', $trigger_file);
+	$changed_since_last_save = 0;
 }
 
 # save on unload
@@ -1011,8 +1018,9 @@ sub cmd_add {
 	if ($trigger) {
 		push @triggers, $trigger;
 		Irssi::printformat(MSGLEVEL_CLIENTCRAP, 'trigger_added', scalar(@triggers), to_string($trigger));
+		rebuild();
+		$changed_since_last_save = 1;
 	}
-	rebuild();
 }
 
 # TRIGGER CHANGE <nr> <options>
@@ -1024,8 +1032,9 @@ sub cmd_change {
 		if(parse_options($triggers[$index], @args)) {
 			Irssi::print("Trigger " . ($index+1) ." changed to: ". to_string($triggers[$index]));
 		}
+		rebuild();
+		$changed_since_last_save = 1;
 	}
-	rebuild();
 }
 
 # parses options for TRIGGER ADD and TRIGGER CHANGE
@@ -1153,8 +1162,9 @@ sub cmd_del {
 	if ($index != -1) {
 		Irssi::print("Deleted ". ($index+1) .": ". to_string($triggers[$index]));
 		splice (@triggers,$index,1);
+		rebuild();
+		$changed_since_last_save = 1;
 	}
-	rebuild();
 }
 
 # TRIGGER MOVE <num> <num>
@@ -1173,6 +1183,7 @@ sub cmd_move {
 		my $trigger = splice (@triggers,$index,1); # remove from old place
 		splice (@triggers,$newindex,0,($trigger)); # insert at new place
 		rebuild();
+		$changed_since_last_save = 1;
 	}
 }
 
@@ -1204,8 +1215,8 @@ command_bind 'trigger' => sub {
     command_runsub('trigger', $data, $server, $item);
 };
 
-Irssi::signal_add('setup saved', 'cmd_save');
-Irssi::signal_add('setup changed', 'sig_setup_changed');
+Irssi::signal_add('setup saved', \&autosave);
+Irssi::signal_add('setup changed', \&sig_setup_changed);
 
 # This makes tab completion work
 Irssi::command_set_options('trigger add',join(' ',@trigger_add_options));
