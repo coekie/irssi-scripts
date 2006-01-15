@@ -32,7 +32,7 @@ When to match:
 On which types of event to trigger:
      These are simply specified by -name_of_the_type
      The normal IRC event types are:
-          publics,privmsgs,pubactions,privactions,pubnotices,privnotices,joins,parts,quits,kicks,topics,invites,nick_changes,dcc_msg,dcc_action,dcc_ctcp
+          publics,privmsgs,pubactions,privactions,pubnotices,privnotices,joins,parts,quits,kicks,topics,invites,nick_changes,dcc_msgs,dcc_actions,dcc_ctcps
           mode_channel: a mode on the (whole) channel (like +t, +i, +b)
           mode_nick: a mode on someone in the channel (like +o, +v)
      -all is an alias for all of those.
@@ -146,7 +146,7 @@ Irssi::theme_register([
 # trigger types with a message and a channel
 my @allchanmsg_types = qw(publics pubactions pubnotices pubctcps pubctcpreplies parts quits kicks topics);
 # trigger types with a message
-my @allmsg_types = (@allchanmsg_types, qw(privmsgs privactions privnotices privctcps privctcpreplies dcc_msg dcc_action dcc_ctcp));
+my @allmsg_types = (@allchanmsg_types, qw(privmsgs privactions privnotices privctcps privctcpreplies dcc_msgs dcc_actions dcc_ctcps));
 # trigger types with a channel
 my @allchan_types = (@allchanmsg_types, qw(mode_channel mode_nick joins invites));
 # trigger types in -all
@@ -240,23 +240,22 @@ my @signals = (
 },
 # "message dcc", DCC_REC *dcc, char *msg
 {
-	'types' => ['dcc_msg'],
+	'types' => ['dcc_msgs'],
 	'signal' => 'message dcc',
-	'sub' => sub {#use Data::Dumper; print "DEBUG: dcc_msg: " . Dumper($_[0]);
-		check_signal_message(\@_,1,$_[0]->{'server'},undef,$_[0]->{'nick'},undef,'dcc_msg');
+	'sub' => sub {check_signal_message(\@_,1,$_[0]->{'server'},undef,$_[0]->{'nick'},undef,'dcc_msgs');
 	}
 },
 # "message dcc action", DCC_REC *dcc, char *msg
 {
-	'types' => ['dcc_action'],
+	'types' => ['dcc_actions'],
 	'signal' => 'message dcc action',
-	'sub' => sub {check_signal_message(\@_,1,$_[0]->{'server'},undef,$_[0]->{'nick'},undef,'dcc_action');}
+	'sub' => sub {check_signal_message(\@_,1,$_[0]->{'server'},undef,$_[0]->{'nick'},undef,'dcc_actions');}
 },
 # "message dcc ctcp", DCC_REC *dcc, char *cmd, char *data
 {
-	'types' => ['dcc_ctcp'],
+	'types' => ['dcc_ctcps'],
 	'signal' => 'message dcc ctcp',
-	'sub' => sub {check_signal_message(\@_,1,$_[0]->{'server'},undef,$_[0]->{'nick'},undef,'dcc_ctcp');}
+	'sub' => sub {check_signal_message(\@_,1,$_[0]->{'server'},undef,$_[0]->{'nick'},undef,'dcc_ctcps');}
 },
 # "server incoming", SERVER_REC, char *data
 {
