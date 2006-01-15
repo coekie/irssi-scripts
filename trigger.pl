@@ -4,10 +4,9 @@ use strict;
 use Irssi 20020324 qw(command_bind command_runsub command signal_add_first signal_continue signal_stop signal_remove);
 use Text::ParseWords;
 use IO::File;
-use Data::Dumper; 
 use vars qw($VERSION %IRSSI);
 
-$VERSION = '0.6.1+2';
+$VERSION = '0.6.1+3';
 %IRSSI = (
 	authors  	=> 'Wouter Coekaerts',
 	contact  	=> 'wouter@coekaerts.be',
@@ -33,15 +32,15 @@ When to match:
 On which types of event to trigger:
      These are simply specified by -name_of_the_type
      The normal IRC event types are:
-          publics,privmsgs,pubactions,privactions,pubnotices,privnotices,joins,parts,quits,kicks,topics,invites,nick_changes
+          publics,privmsgs,pubactions,privactions,pubnotices,privnotices,joins,parts,quits,kicks,topics,invites,nick_changes,dcc_msg,dcc_action,dcc_ctcp
+          mode_channel: a mode on the (whole) channel (like +t, +i, +b)
+          mode_nick: a mode on someone in the channel (like +o, +v)
      -all is an alias for all of those.
      Additionally, there is:
           rawin: raw text incoming from the server
           send_command: commands you give to irssi
           send_text: lines you type that aren't commands
           beep: when irssi beeps
-          mode_channel: a mode on the (whole) channel (like +t, +i, +b)
-          mode_nick: a mode on someone in the channel (like +o, +v)
           notify_join: someone in you notify list comes online
           notify_part: someone in your notify list goes offline
           notify_away: someone in your notify list goes away
@@ -78,12 +77,17 @@ What to do when it matches:
                    $I: His ident (foo)
                    $H: His hostname (bar.com)
                    $M: The complete message
+                   ${other}: The victim for kicks or mode_nick
+                   ${mode_type}: The type ('+' or '-') for a mode_channel or mode_nick
+                   ${mode_char}: The mode char ('o' for ops, 'b' for ban,...)
+                   ${mode_arg} : The argument to the mode (if there is one)
                 $\X, with X being one of the above expands (e.g. $\M), escapes all non-alphanumeric characters, so it can be used with /eval or /exec. Don't use /eval or /exec without this, it's not safe.
 
      -replace: replaces the matching part with the given replacement in the event
                (requires a -regexp or -pattern)
      -once: remove the trigger if it is triggered, so it only executes once and then is forgotten.
      -stop: stops the signal. It won't get displayed by Irssi. Like /IGNORE
+     -debug: print some debugging info
 
 Other options:
      -disabled: Same as removing it, but keeps it in case you might need it later
@@ -139,18 +143,34 @@ Irssi::theme_register([
 ### catch the signals & do your thing ###
 #########################################
 
+# trigger types with a message and a channel
+my @allchanmsg_types = qw(publics pubactions pubnotices pubctcps pubctcpreplies parts quits kicks topics);
+# trigger types with a message
+my @allmsg_types = (@allchanmsg_types, qw(privmsgs privactions privnotices privctcps privctcpreplies dcc_msg dcc_action dcc_ctcp));
+# trigger types with a channel
+my @allchan_types = (@allchanmsg_types, qw(mode_channel mode_nick joins invites));
+# trigger types in -all
+my @all_types = (@allmsg_types, qw(mode_channel mode_nick joins invites nick_changes));
+# trigger types with a server
+my @all_server_types = (@all_types, qw(rawin notify_join notify_part notify_away notify_unaway notify_unidle));
+# all trigger types
+my @trigger_types = (@all_server_types, qw(send_command send_text beep));
+#trigger types that are not in -all
+#my @notall_types = grep {my $a=$_; return (!grep {$_ eq $a} @all_types);} @trigger_types;
+my @notall_types = qw(rawin notify_join notify_part notify_away notify_unaway notify_unidle send_command send_text beep);
+
 my @signals = (
 # "message public", SERVER_REC, char *msg, char *nick, char *address, char *target
 {
 	'types' => ['publics'],
 	'signal' => 'message public',
-	'sub' => sub {check_signal_message(\@_,1,$_[0],$_[4],$_[2],$_[3],'publics');}
+	'sub' => sub {check_signal_message(\@_,1,$_[0],$_[4],$_[2],$_[3],'publics');},
 },
 # "message private", SERVER_REC, char *msg, char *nick, char *address
 {
 	'types' => ['privmsgs'],
 	'signal' => 'message private',
-	'sub' => sub {check_signal_message(\@_,1,$_[0],undef,$_[2],$_[3],'privmsgs');}
+	'sub' => sub {check_signal_message(\@_,1,$_[0],undef,$_[2],$_[3],'privmsgs');},
 },
 # "message irc action", SERVER_REC, char *msg, char *nick, char *address, char *target
 {
@@ -162,7 +182,7 @@ my @signals = (
 		} else {
 			check_signal_message(\@_,1,$_[0],$_[4],$_[2],$_[3],'pubactions');
 		}
-	}
+	},
 },
 # "message irc notice", SERVER_REC, char *msg, char *nick, char *address, char *target
 {
@@ -217,6 +237,26 @@ my @signals = (
 	'types' => ['nick_changes'],
 	'signal' => 'message nick',
 	'sub' => sub {check_signal_message(\@_,-1,$_[0],undef,$_[1],$_[3],'nick_changes');}
+},
+# "message dcc", DCC_REC *dcc, char *msg
+{
+	'types' => ['dcc_msg'],
+	'signal' => 'message dcc',
+	'sub' => sub {#use Data::Dumper; print "DEBUG: dcc_msg: " . Dumper($_[0]);
+		check_signal_message(\@_,1,$_[0]->{'server'},undef,$_[0]->{'nick'},undef,'dcc_msg');
+	}
+},
+# "message dcc action", DCC_REC *dcc, char *msg
+{
+	'types' => ['dcc_action'],
+	'signal' => 'message dcc action',
+	'sub' => sub {check_signal_message(\@_,1,$_[0]->{'server'},undef,$_[0]->{'nick'},undef,'dcc_action');}
+},
+# "message dcc ctcp", DCC_REC *dcc, char *cmd, char *data
+{
+	'types' => ['dcc_ctcp'],
+	'signal' => 'message dcc ctcp',
+	'sub' => sub {check_signal_message(\@_,1,$_[0]->{'server'},undef,$_[0]->{'nick'},undef,'dcc_ctcp');}
 },
 # "server incoming", SERVER_REC, char *data
 {
@@ -281,7 +321,6 @@ my @signals = (
 	}
 },
 # "notifylist joined", SERVER_REC, char *nick, char *user, char *host, char *realname, char *awaymsg
-# ($signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra)
 {
 	'types' => ['notify_join'],
 	'signal' => 'notifylist joined',
@@ -347,6 +386,7 @@ sub sig_send_text_or_command {
 
 my %filters = (
 'tags' => {
+	'types' => \@all_server_types,
 	'sub' => sub {
 		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
 		
@@ -364,6 +404,7 @@ my %filters = (
 	}
 },
 'channels' => {
+	'types' => \@allchan_types,
 	'sub' => sub {
 		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
 		
@@ -383,6 +424,7 @@ my %filters = (
 	}
 },
 'masks' => {
+	'types' => \@all_types,
 	'sub' => sub {
 		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
 		return  (defined($nickname) && defined($address) && defined($server) && $server->masks_match($param, $nickname, $address));
@@ -398,6 +440,7 @@ my %filters = (
 	}
 },
 'hasmode' => {
+	'types' => \@all_types,
 	'sub' => sub {
 		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
 		return hasmode($param, $nickname, $server, $channelname);
@@ -411,6 +454,7 @@ my %filters = (
 	}
 },
 'hasflag' => {
+	'types' => \@all_types,
 	'sub' => sub {
 		my ($param, $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra) = @_;
 		return 0 unless defined($nickname) && defined($address) && defined($server);
@@ -467,26 +511,21 @@ sub get_nickrec {
 sub hasmode {
 	my ($param, $nickname, $server, $channelname) = @_;
 	my $nickrec = get_nickrec($nickname, $server, $channelname);
-	print "DEBUG: nickrec not found" unless defined $nickrec;
 	return 0 unless defined $nickrec;
 	my $modes =
 		($nickrec->{'op'} ? 'o' : '')
-	. ($nickrec->{'voice'} ? 'v' : '')
-	. ($nickrec->{'halfop'} ? 'h' : '')
+		. ($nickrec->{'voice'} ? 'v' : '')
+		. ($nickrec->{'halfop'} ? 'h' : '')
 	;
 	return check_modes($modes, $param);
 }
 
-# trigger types in -all option
-my @trigger_all_switches = qw(publics privmsgs pubactions privactions pubnotices privnotices pubctcps privctcps pubctcpreplies privctcpreplies joins parts quits kicks topics invites nick_changes);
-# all trigger types
-my @trigger_types = (@trigger_all_switches, qw(rawin send_command send_text beep mode_channel mode_nick notify_join notify_part notify_away notify_unaway notify_unidle));
 # list of all switches
-my @trigger_switches = (@trigger_types, qw(nocase stop once debug disabled));
+my @trigger_switches = (@trigger_types, qw(all nocase stop once debug disabled));
 # parameters (with an argument)
 my @trigger_params = qw(pattern regexp command replace name);
 # list of all options (including switches) for /TRIGGER ADD
-my @trigger_add_options = ('all', @trigger_switches, @trigger_params, keys(%filters));
+my @trigger_add_options = (@trigger_switches, @trigger_params, keys(%filters));
 # same for /TRIGGER CHANGE, this includes the -no<option>'s
 my @trigger_options = map(($_,'no'.$_) ,@trigger_add_options);
 
@@ -508,13 +547,7 @@ sub check_signal_message {
 	$recursion_depth++;
 
 TRIGGER:	
-	#for (my $index=0; $index < scalar(@{$triggers_by_type{$condition}}); $index++) { 
 	foreach my $trigger (@{$triggers_by_type{$condition}}) {
-		#my $trigger = $triggers_by_type{$condition}->[$index];
-		if (!$trigger->{$condition}) {
-			Irssi::print("DEBUG: wrong type of trigger... this shouldn't happen");
-		}
-		
 		# check filters
 		foreach my $trigfilter (@{$trigger->{'filters'}}) {
 			if (! ($trigfilter->[2]($trigfilter->[1], $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra))) {
@@ -734,9 +767,25 @@ sub compile_trigger {
 sub rebuild {
 	%triggers_by_type = ();
 	foreach my $trigger (@triggers) {
-		foreach my $type (@trigger_types) {
-			if ($trigger->{$type} && !$trigger->{'disabled'}) {
-				push @{$triggers_by_type{$type}}, ($trigger);
+		if (!$trigger->{'disabled'}) {
+			if ($trigger->{'all'}) {
+				# -all is an alias for all types in @all_types for which the filters can apply
+ALLTYPES:
+				foreach my $type (@all_types) {
+					# check if all filters can apply to $type
+					foreach my $filter (@{$trigger->{'filters'}}) {
+						if (! grep {$_ eq $type} $filters{$filter->[0]}->{'types'}) {
+							next ALLTYPES;
+						}
+					}
+					push @{$triggers_by_type{$type}}, ($trigger);
+				}
+			}
+			
+			foreach my $type ($trigger->{'all'} ? @notall_types : @trigger_types) {
+				if ($trigger->{$type}) {
+					push @{$triggers_by_type{$type}}, ($trigger);
+				}
 			}
 		}
 	}
@@ -770,16 +819,6 @@ sub sig_setup_changed {
 
 # TRIGGER SAVE
 sub cmd_save {
-	#my $filename = Irssi::settings_get_str('trigger_file');
-	#my $io = new IO::File $filename, "w";
-	#if (defined $io) {
-	#	my $dumper = Data::Dumper->new([\@triggers]);
-	#	$dumper->Purity(1)->Deepcopy(1);
-	#	$io->print("#Triggers file version $VERSION\n");
-	#	$io->print($dumper->Dump);
-	#	$io->close;
-	#}
-	
 	my $io = new IO::File $trigger_file, "w";
 	if (defined $io) {
 		$io->print("#Triggers file version $VERSION\n");
@@ -827,9 +866,6 @@ sub cmd_load {
 		
 			for (my $index=0;$index < scalar(@old_triggers);$index++) { 
 				my $trigger = $old_triggers[$index];
-	
-				# compile regexp
-				# compile_trigger($trigger);
 	
 				if ($file_version lt '0.6.1') {
 					# convert old names: notices => pubnotices, actions => pubactions
@@ -907,21 +943,9 @@ sub to_string {
 	my ($trigger, $compat) = @_;
 	my $string;
 	
-	# check if all @trigger_all_switches are set
-	my $all_set = 1;
-	foreach my $switch (@trigger_all_switches) {
-		if (!$trigger->{$switch}) {
-			$all_set = 0;
-			last;
-		}
-	}
-	if ($all_set) {
-		$string .= '-all ';	
-	} else {
-		foreach my $switch (@trigger_switches) {
-			if ($trigger->{$switch}) {
-				$string .= '-'.$switch.' ';
-			}
+	foreach my $switch (@trigger_switches) {
+		if ($trigger->{$switch}) {
+			$string .= '-'.$switch.' ';
 		}
 	}
 	
@@ -970,7 +994,6 @@ sub cmd_add {
 	my $trigger = parse_options({}, @args);
 	if ($trigger) {
 		push @triggers, $trigger;
-		#Irssi::print("Added trigger " . scalar(@triggers) .": ". to_string($trigger));
 		Irssi::printformat(MSGLEVEL_CLIENTCRAP, 'trigger_added', scalar(@triggers), to_string($trigger));
 	}
 	rebuild();
@@ -1032,13 +1055,13 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 			}
 		}
 		# -[no]all
-		if ($option eq 'all' || $option eq 'noall') {
-			my $on_or_off = ($option eq 'all') ? 1 : undef;
-			foreach my $switch (@trigger_all_switches) {
-				$trigger->{$switch} = $on_or_off;
-			}
-			next ARGS;
-		}
+		#if ($option eq 'all' || $option eq 'noall') {
+		#	my $on_or_off = ($option eq 'all') ? 1 : undef;
+		#	foreach my $switch (@all_types) {
+		#		$trigger->{$switch} = $on_or_off;
+		#	}
+		#	next ARGS;
+		#}
 
 		# -[no]<switch>
 		foreach my $switch (@trigger_switches) {
@@ -1077,6 +1100,25 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 		Irssi::print("Trigger error: Can't have -pattern and -regexp in same trigger", MSGLEVEL_CLIENTERROR);
 		return undef;
 	}
+	
+	# remove types that are implied by -all
+	if ($trigger->{'all'}) {
+		foreach my $type (@all_types) {
+			delete $trigger->{$type};
+		}
+	}
+	
+	# remove types for which the filters don't apply
+	foreach my $type (@trigger_types) {
+		if ($trigger->{$type}) {
+			foreach my $filter (@{$trigger->{'filters'}}) {
+				if (!grep {$_ eq $type} $filters{$filter->[0]}->{'types'}) {
+					Irssi::print("Warning: the filter -" . $filter->[0] . " can't apply to an event of type -$type, so I'm removing that type from this trigger.");
+					delete $trigger->{$type};
+				}
+			}
+		}
+	}
 
 	# check if it has at least one type
 	my $has_a_type;
@@ -1086,7 +1128,7 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 			last;
 		}
 	}
-	if (!$has_a_type) {
+	if (!$has_a_type && !$trigger->{'all'}) {
 		Irssi::print("Warning: this trigger doesn't trigger on any type of message. you probably want to add -publics or -all");
 	}
 	
@@ -1135,10 +1177,6 @@ sub cmd_list {
 	}
 }
 
-command_bind('trigger debug', sub {
-	print "DEBUG: " . Dumper(\@triggers);
-});
-
 ######################
 ### initialisation ###
 ######################
@@ -1156,10 +1194,6 @@ command_bind 'trigger' => sub {
     my ( $data, $server, $item ) = @_;
     $data =~ s/\s+$//g;
     command_runsub('trigger', $data, $server, $item);
-};
-signal_add_first 'default command trigger' => sub {
-	# gets triggered if called with unknown subcommand
-	cmd_help();
 };
 
 Irssi::signal_add('setup saved', 'cmd_save');
