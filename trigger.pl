@@ -1,4 +1,21 @@
-# Do /TRIGGER HELP for help
+# trigger.pl - execute a command or replace text, triggered by an event in irssi
+# Do /TRIGGER HELP or look at http://wouter.coekaerts.be/irssi/ for help
+
+# Copyright (C) 2002-2006  Wouter Coekaerts <wouter@coekaerts.be>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 use strict;
 use Irssi 20020324 qw(command_bind command_runsub command signal_add_first signal_continue signal_stop signal_remove);
@@ -6,15 +23,15 @@ use Text::ParseWords;
 use IO::File;
 use vars qw($VERSION %IRSSI);
 
-$VERSION = '0.6.1+3';
+$VERSION = '0.6.1+4';
 %IRSSI = (
-	authors  	=> 'Wouter Coekaerts',
-	contact  	=> 'wouter@coekaerts.be',
-	name    	=> 'trigger',
-	description 	=> 'execute a command or replace text, triggered by a message,notice,join,part,quit,kick,topic or invite',
-	license 	=> 'GPLv2',
-	url     	=> 'http://wouter.coekaerts.be/irssi/',
-	changed  	=> '$LastChangedDate$',
+	authors     => 'Wouter Coekaerts',
+	contact     => 'wouter@coekaerts.be',
+	name        => 'trigger',
+	description => 'execute a command or replace text, triggered by an event in irssi',
+	license     => 'GPLv2 or later',
+	url         => 'http://wouter.coekaerts.be/irssi/',
+	changed     => '$LastChangedDate$',
 );
 
 sub cmd_help {
@@ -1053,14 +1070,6 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 				next ARGS;
 			}
 		}
-		# -[no]all
-		#if ($option eq 'all' || $option eq 'noall') {
-		#	my $on_or_off = ($option eq 'all') ? 1 : undef;
-		#	foreach my $switch (@all_types) {
-		#		$trigger->{$switch} = $on_or_off;
-		#	}
-		#	next ARGS;
-		#}
 
 		# -[no]<switch>
 		foreach my $switch (@trigger_switches) {
