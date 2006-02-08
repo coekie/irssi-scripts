@@ -910,12 +910,6 @@ sub cmd_load {
 					$converted = 1;
 				}
 				
-				if (defined($trigger->{'replace'}) && ! $trigger->{'regexp'}) {
-					Irssi::print("Trigger: trigger ".($index+1)." had -replace but no -regexp, removed it");
-					splice (@old_triggers,$index,1);
-					$index--; # nr of next trigger now is the same as this one was
-				}
-				
 				# convert to text with compat, and then to new trigger hash
 				$text = to_string($trigger,1);
 				my @args = &shellwords($text . ' a');
