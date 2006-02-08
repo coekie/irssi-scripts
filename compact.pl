@@ -44,6 +44,8 @@ Irssi::signal_add_priority("message public", sub {
 			$view->remove_line($secondlast);
 
 			# replace with a combined line  (which doesn't get logged)
+			$msg =~ s/%/%%/g;
+			$secondlast_text =~ s/%/%%/g;
 			$win->print($secondlast_text . ' | ' . $msg, MSGLEVEL_NEVER);
 
 			# removing lines needs redraw... unless we could somehow prevent the last message from being printed, but still get logged
