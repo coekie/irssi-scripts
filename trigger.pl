@@ -790,7 +790,7 @@ ALLTYPES:
 				foreach my $type (@all_types) {
 					# check if all filters can apply to $type
 					foreach my $filter (@{$trigger->{'filters'}}) {
-						if (! grep {$_ eq $type} $filters{$filter->[0]}->{'types'}) {
+						if (! grep {$_ eq $type} @{$filters{$filter->[0]}->{'types'}}) {
 							next ALLTYPES;
 						}
 					}
