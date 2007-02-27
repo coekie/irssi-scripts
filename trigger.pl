@@ -921,6 +921,7 @@ sub cmd_load {
 		} else { # new format
 			while ( $text = $io->getline ) {
 				chop($text);
+				next if ($text =~ /^[ ]*$|^#/);
 				my @args = &shellwords($text . ' a');
 				my $trigger = parse_options({},@args);
 				if ($trigger) {
