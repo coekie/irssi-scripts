@@ -1,4 +1,21 @@
+# This script adds a nicklist to the right of irssi
 # for documentation: see http://wouter.coekaerts.be/site/irssi/nicklist
+
+# Copyright (C) 2002-2007  Wouter Coekaerts <coekie@irssi.org>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 use Irssi;
 use strict;
@@ -11,9 +28,9 @@ $VERSION = '0.4.6+';
 	contact     => 'coekie@irssi.org',
 	name        => 'nicklist',
 	description => 'draws a nicklist to another terminal, or at the right of your irssi in the same terminal',
-	license     => 'GPLv2',
+	license     => 'GPLv2+',
 	url         => 'http://wouter.coekaerts.be/irssi',
-	changed     => '29/06/2004'
+	changed     => '05/05/2007'
 );
 
 sub cmd_help {
