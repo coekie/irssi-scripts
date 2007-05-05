@@ -56,24 +56,25 @@ my $active_channel;                  # (REC)
 
 my @nicklist=();                     # array of hashes, containing the internal nicklist of the active channel
 	# nick => realnick
-	# mode =>
-	my ($MODE_OP, $MODE_HALFOP, $MODE_VOICE, $MODE_NORMAL) = (0,1,2,3);
-	# status =>
-	my ($STATUS_NORMAL, $STATUS_JOINING, $STATUS_PARTING, $STATUS_QUITING, $STATUS_KICKED, $STATUS_SPLIT) = (0,1,2,3,4,5);
+	# modeflag => '@', '%', '+', or other mode char
+	# modepos => number representing the position in which to sort nicks with that mode
+	# status => (not used yet...)
+	#my ($STATUS_NORMAL, $STATUS_JOINING, $STATUS_PARTING, $STATUS_QUITING, $STATUS_KICKED, $STATUS_SPLIT) = (0,1,2,3,4,5);
 	# text => text to be printed
 	# cmp => text used to compare (sort) nicks
 
 
 # 'cached' settings
-my ($screen_prefix, $irssi_width, @prefix_mode, @prefix_status, $height, $nicklist_width, $check_friends, $friend_normal_prefix, $friend_normal_suffix, $friend_op_prefix, $friend_op_suffix);
+my ($screen_prefix, $irssi_width, %prefix_mode, $prefix_mode_other, @prefix_status, $height, $nicklist_width, $check_friends, $friend_normal_prefix, $friend_normal_suffix, $friend_op_prefix, $friend_op_suffix);
 
 sub read_settings {
 	($screen_prefix = Irssi::settings_get_str('nicklist_screen_prefix')) =~ s/\\e/\033/g;
 
-	($prefix_mode[$MODE_OP] = Irssi::settings_get_str('nicklist_prefix_mode_op')) =~ s/\\e/\033/g;
-	($prefix_mode[$MODE_HALFOP] = Irssi::settings_get_str('nicklist_prefix_mode_halfop')) =~ s/\\e/\033/g;
-	($prefix_mode[$MODE_VOICE] = Irssi::settings_get_str('nicklist_prefix_mode_voice')) =~ s/\\e/\033/g;
-	($prefix_mode[$MODE_NORMAL] = Irssi::settings_get_str('nicklist_prefix_mode_normal')) =~ s/\\e/\033/g;
+	($prefix_mode{'@'} = Irssi::settings_get_str('nicklist_prefix_mode_op')) =~ s/\\e/\033/g;
+	($prefix_mode{'%'} = Irssi::settings_get_str('nicklist_prefix_mode_halfop')) =~ s/\\e/\033/g;
+	($prefix_mode{'+'} = Irssi::settings_get_str('nicklist_prefix_mode_voice')) =~ s/\\e/\033/g;
+	($prefix_mode{' '} = Irssi::settings_get_str('nicklist_prefix_mode_normal')) =~ s/\\e/\033/g;
+	($prefix_mode_other = Irssi::settings_get_str('nicklist_prefix_mode_other')) =~ s/\\e/\033/g;
 	
 	(my $friend_normal = Irssi::settings_get_str('nicklist_friend_normal')) =~ s/\\e/\033/g;
 	($friend_normal_prefix, $friend_normal_suffix) = split(/nick/,$friend_normal,2);
@@ -277,11 +278,17 @@ sub calc_text {
 		}
 	}
 	
+	my $prefix_mode = $prefix_mode{$nick->{'modeflag'}};
+	if (! defined($prefix_mode) ) {
+		$prefix_mode = $prefix_mode_other;
+		$prefix_mode =~ s/{flag}/$nick->{'modeflag'}/;
+	}
+	
 	$nick->{'text'} =
-		$prefix_mode[$nick->{'mode'}] .
+		$prefix_mode .
 		$text .
 		(' ' x ($nicklist_width-length($nick->{'nick'})-1));
-	$nick->{'cmp'} = $nick->{'mode'}.lc($nick->{'nick'});
+	$nick->{'cmp'} = $nick->{'modepos'}.lc($nick->{'nick'});
 }
 
 # redraw the given nick (nr) if it is visible
@@ -521,13 +528,12 @@ sub make_nicklist {
 	} else {
 		$active_channel = $channel;
 		### make nicklist ###
-		my $thisnick;
-		foreach my $nick (sort {(($a->{'op'}?'1':$a->{'halfop'}?'2':$a->{'voice'}?'3':'4').lc($a->{'nick'}))
-		                    cmp (($b->{'op'}?'1':$b->{'halfop'}?'2':$b->{'voice'}?'3':'4').lc($b->{'nick'}))} $channel->nicks()) {
-			$thisnick = {'nick' => $nick->{'nick'}, 'mode' => ($nick->{'op'}?$MODE_OP:$nick->{'halfop'}?$MODE_HALFOP:$nick->{'voice'}?$MODE_VOICE:$MODE_NORMAL), 'host' => $nick->{'host'}};
-			calc_text($thisnick);
+		foreach my $nick ($channel->nicks()) {
+			my $thisnick = {'nick' => $nick->{'nick'}};
+			recalc_nick($thisnick, $nick);
 			push @nicklist, $thisnick;
 		}
+		@nicklist = sort {$a->{'cmp'} cmp $b->{'cmp'}} @nicklist;
 	}
 	need_redraw();
 }
@@ -546,6 +552,30 @@ sub remove_nick {
 	my ($nr) = @_;
 	splice @nicklist, $nr, 1;
 	draw_remove_nick_nr($nr);
+}
+
+# update the mode and cmp of a nick, based on a nickrec from irssi
+sub recalc_nick {
+	my ($nick, $nickrec) = @_;
+	
+	my $nickflags = $active_channel->{'server'}->get_nick_flags() . ' ';
+	
+	my $flag = (
+		$nickrec->{'op'} ? '@' :
+		$nickrec->{'halfop'} ? '%' :
+		$nickrec->{'voice'} ? '+' :
+		' '
+	);
+	
+	if ($nickrec->{'other'} && index($nickflags, $nick->{'other'}) < index($nickflags, $flag) {
+		$flag = chr($nickrec->{'other'});
+	}
+	
+	$nick->{'modepos'} = index($nickflags, $flag);
+	$nick->{'modeflag'} = $flag;
+	
+	$nick->{'host'} = $nickrec->{'host'};
+	calc_text($nick);
 }
 
 ###################
@@ -591,8 +621,8 @@ sub sig_join {
 	if (!is_active_channel($server,$channel)) {
 		return;
 	}
-	my $newnick = {'nick' => $nick, 'mode' => $MODE_NORMAL, 'host' => $address};
-	calc_text($newnick);
+	my $newnick = {'nick' => $nick};
+	recalc_nick($newnick, $nick);
 	insert_nick($newnick);
 }
 
@@ -660,8 +690,7 @@ sub sig_mode {
 	} else {
 		my $nicklist_item = $nicklist[$nr];
 		remove_nick($nr);
-		$nicklist_item->{'mode'} = ($nick->{'op'}?$MODE_OP:$nick->{'halfop'}?$MODE_HALFOP:$nick->{'voice'}?$MODE_VOICE:$MODE_NORMAL);
-		calc_text($nicklist_item);
+		recalc_nick($nicklist_item, $nick);
 		insert_nick($nicklist_item);
 	}
 }
@@ -704,6 +733,7 @@ Irssi::settings_add_str('nicklist', 'nicklist_prefix_mode_op', '\e[32m@\e[39m');
 Irssi::settings_add_str('nicklist', 'nicklist_prefix_mode_halfop', '\e[34m%\e[39m');
 Irssi::settings_add_str('nicklist', 'nicklist_prefix_mode_voice', '\e[33m+\e[39m');
 Irssi::settings_add_str('nicklist', 'nicklist_prefix_mode_normal', ' ');
+Irssi::settings_add_str('nicklist', 'nicklist_prefix_mode_other', '\e[35m{flag}\e[39m');
 Irssi::settings_add_str('nicklist', 'nicklist_friend_normal', '\e[4mnick\e[24m');
 Irssi::settings_add_str('nicklist', 'nicklist_friend_op', '\e[1m');
 
