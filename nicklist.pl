@@ -82,7 +82,7 @@ my @nicklist=();                     # array of hashes, containing the internal 
 
 
 # 'cached' settings
-my ($screen_prefix, $irssi_width, %prefix_mode, $prefix_mode_other, @prefix_status, $height, $nicklist_width, $check_friends, $friend_normal_prefix, $friend_normal_suffix, $friend_op_prefix, $friend_op_suffix);
+my ($screen_prefix, $irssi_width, %prefix_mode, @prefix_status, $height, $nicklist_width, $check_friends, @prefix_friends);
 
 sub read_settings {
 	($screen_prefix = Irssi::settings_get_str('nicklist_screen_prefix')) =~ s/\\e/\033/g;
@@ -91,14 +91,30 @@ sub read_settings {
 	($prefix_mode{'%'} = Irssi::settings_get_str('nicklist_prefix_mode_halfop')) =~ s/\\e/\033/g;
 	($prefix_mode{'+'} = Irssi::settings_get_str('nicklist_prefix_mode_voice')) =~ s/\\e/\033/g;
 	($prefix_mode{' '} = Irssi::settings_get_str('nicklist_prefix_mode_normal')) =~ s/\\e/\033/g;
-	($prefix_mode_other = Irssi::settings_get_str('nicklist_prefix_mode_other')) =~ s/\\e/\033/g;
 	
-	(my $friend_normal = Irssi::settings_get_str('nicklist_friend_normal')) =~ s/\\e/\033/g;
-	($friend_normal_prefix, $friend_normal_suffix) = split(/nick/,$friend_normal,2);
-	(my $friend_op = Irssi::settings_get_str('nicklist_friend_op')) =~ s/\\e/\033/g;
-	($friend_op_prefix, $friend_op_suffix) = split(/nick/,$friend_op,2);
+	(my $prefix_mode_other = Irssi::settings_get_str('nicklist_prefix_mode_other')) =~ s/\\e/\033/g;
+	foreach my $p (split (/ /, $prefix_mode_other)) {
+		next if $p eq '';
+		if ($p !~ /(.)=(.*)/) {
+			Irssi::print("Could not parse nicklist_prefix_mode_other part '$p'. Expected space separated list of <mode character>=<prefix>");
+			last;
+		} else {
+			$prefix_mode{$1} = $2;
+		}
+	}
 	
-	$check_friends = ($friend_normal ne '' || $friend_op ne '');
+	(my $prefix_friends = Irssi::settings_get_str('nicklist_prefix_friends')) =~ s/\\e/\033/g;
+	foreach my $p (split (/ /, $prefix_friends)) {
+		next if $p eq '';
+		if ($p !~ /(.+?)=(.*)/) {
+			Irssi::print("Could not parse nicklist_prefix_friends part '$p'. Expected space separated list of <flags>=<prefix>");
+			last;
+		} else {
+			push @prefix_friends, {'flags' => $1, 'prefix' => $2};
+		}
+	}
+	
+	$check_friends = ($prefix_friends ne '');
 	
 	if ($mode != $SCREEN) {
 		$height = Irssi::settings_get_int('nicklist_height');
@@ -199,6 +215,11 @@ sub screen_size {
 	$screen_resizing = 1;
 	# fit screen
 	system 'screen -x '.$ENV{'STY'}.' -X fit';
+	# we wait a second to make sure the fit command was processed
+	Irssi::timeout_add_once(1000, \&screen_size_real, []);
+}		
+
+sub screen_size_real {
 	# get size (from perldoc -q size)
 	my ($winsize, $row, $col, $xpixel, $ypixel);
 	eval 'use Term::ReadKey; ($col, $row, $xpixel, $ypixel) = GetTerminalSize';
@@ -230,14 +251,9 @@ sub screen_size {
 	$irssi_width = $col-$nicklist_width-1;
 	$height = $row-1;
 	
-	# on some recent systems, "screen -X fit; screen -X width -w 50" doesn't work, needs a sleep in between the 2 commands
-	# so we wait a second before setting the width
-	Irssi::timeout_add_once(1000, sub {
-		my ($new_irssi_width) = @_;
-		system 'screen -x '.$ENV{'STY'}.' -X width -w ' . $new_irssi_width;
-		# and then we wait another second for the resizing, and then redraw.
-		Irssi::timeout_add_once(1000,sub {$screen_resizing = 0; redraw()}, []);
-	}, $irssi_width);
+	system 'screen -x '.$ENV{'STY'}.' -X width -w ' . $irssi_width;
+	# wait another second for the resizing, and then redraw.
+	Irssi::timeout_add_once(1000,sub {$screen_resizing = 0; redraw()}, []);
 }
 
 sub sig_terminal_resized {
@@ -281,30 +297,49 @@ sub nicklist_write_line {
 	}
 }
 
+sub calc_prefix_friends {
+	my ($nick) = @_;
+
+	return '' unless $check_friends
+		&& $nick->{'host'}
+		&& is_friend($active_channel->{'server'}->{'chatnet'}, $active_channel->{'name'}, $nick->{'nick'}, $nick->{'host'});
+	
+	my $flags = get_flags($active_channel->{'server'}->{'chatnet'}, $active_channel->{'name'}, $nick->{'nick'}, $nick->{'host'});
+	
+	my $prefix;
+	foreach my $prefix_friend (@prefix_friends) {
+		if ($prefix_friend->{'flags'} eq 'noflag') {
+			if ($flags eq '') {
+				$prefix = $prefix_friend->{'prefix'};
+				last;
+			}
+		} elsif (check_modes($flags, $prefix_friend->{'flags'})) {
+			$prefix = $prefix_friend->{'prefix'};
+		}
+	}
+	
+	return $prefix ? $prefix : '';
+}
+
 # recalc the text of the nicklist item
 sub calc_text {
 	my ($nick) = @_;
 	my $tmp = $nicklist_width-3;
-	(my $text = $nick->{'nick'}) =~ s/^(.{$tmp})..+$/$1\033[34m~\033[m/; # strip nick if too long
-	
-	if ($check_friends && $nick->{'host'} && is_friend($active_channel->{'server'}->{'chatnet'}, $active_channel->{'name'}, $nick->{'nick'}, $nick->{'host'})) {
-		if (check_modes(get_flags($active_channel->{'server'}->{'chatnet'}, $active_channel->{'name'}, $nick->{'nick'}, $nick->{'host'}),'+o')) {
-			$text = $friend_op_prefix . $text . $friend_op_suffix;
-		} else {
-			$text = $friend_normal_prefix . $text . $friend_normal_suffix;
-		}
-	}
+	(my $text = $nick->{'nick'}) =~ s/^(.{$tmp})..+$/$1\033[34m~/; # strip nick if too long
 	
 	my $prefix_mode = $prefix_mode{$nick->{'modeflag'}};
 	if (! defined($prefix_mode) ) {
-		$prefix_mode = $prefix_mode_other;
-		$prefix_mode =~ s/{flag}/$nick->{'modeflag'}/;
+		$prefix_mode = $nick->{'modeflag'};
 	}
+	
+	my $prefix_friends = calc_prefix_friends($nick);
 	
 	$nick->{'text'} =
 		$prefix_mode .
+		$prefix_friends .
 		$text .
-		(' ' x ($nicklist_width-length($nick->{'nick'})-1));
+		(' ' x ($nicklist_width-length($nick->{'nick'})-1)) .
+		"\033[m"; # reset
 	$nick->{'cmp'} = $nick->{'modepos'}.lc($nick->{'nick'});
 }
 
@@ -420,7 +455,7 @@ sub sig_gui_print_text_finished {
 ##### FRIENDS #####
 ###################
 
-# checks if  $has_modes is in $need_modes, copied from trigger.pl
+# checks if $has_modes is in $need_modes, copied from trigger.pl
 sub check_modes {
 	my ($has_modes, $need_modes) = @_;
 	my $matches;
@@ -574,6 +609,9 @@ sub remove_nick {
 # update the mode and cmp of a nick, based on a nickrec from irssi
 sub recalc_nick {
 	my ($nick, $nickrec) = @_;
+	if (! $nickrec) {
+		$nickrec = $active_channel->nick_find($nick->{'nick'});
+	}
 	
 	my $nickflags = $active_channel->{'server'}->get_nick_flags() . ' ';
 	
@@ -584,7 +622,7 @@ sub recalc_nick {
 		' '
 	);
 	
-	if ($nickrec->{'other'} && index($nickflags, $nick->{'other'}) < index($nickflags, $flag) {
+	if ($nickrec->{'other'} && index($nickflags, $nick->{'other'}) < index($nickflags, $flag)) {
 		$flag = chr($nickrec->{'other'});
 	}
 	
@@ -639,7 +677,7 @@ sub sig_join {
 		return;
 	}
 	my $newnick = {'nick' => $nick};
-	recalc_nick($newnick, $nick);
+	recalc_nick($newnick);
 	insert_nick($newnick);
 }
 
@@ -750,9 +788,8 @@ Irssi::settings_add_str('nicklist', 'nicklist_prefix_mode_op', '\e[32m@\e[39m');
 Irssi::settings_add_str('nicklist', 'nicklist_prefix_mode_halfop', '\e[34m%\e[39m');
 Irssi::settings_add_str('nicklist', 'nicklist_prefix_mode_voice', '\e[33m+\e[39m');
 Irssi::settings_add_str('nicklist', 'nicklist_prefix_mode_normal', ' ');
-Irssi::settings_add_str('nicklist', 'nicklist_prefix_mode_other', '\e[35m{flag}\e[39m');
-Irssi::settings_add_str('nicklist', 'nicklist_friend_normal', '\e[4mnick\e[24m');
-Irssi::settings_add_str('nicklist', 'nicklist_friend_op', '\e[1m');
+Irssi::settings_add_str('nicklist', 'nicklist_prefix_mode_other', '&=\e[31m&\e[39m ~=\e[35m~\e[39m');
+Irssi::settings_add_str('nicklist', 'nicklist_prefix_friends', 'o=\e[32m v=\e[33m noflag=\e[1m');
 
 Irssi::settings_add_int('nicklist', 'nicklist_width',11);
 Irssi::settings_add_int('nicklist', 'nicklist_height',24);
