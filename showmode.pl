@@ -1,7 +1,5 @@
-use strict;
-use Irssi 20021028;
-use vars qw($VERSION %IRSSI);
-
+# This script shows modes in parts, quits, kicks, topic changes or actions, like show_nickmode does for public messages
+#
 # Usage:
 # You must change your formats to include the $mode, for example:
 # default format for part is:
@@ -11,14 +9,34 @@ use vars qw($VERSION %IRSSI);
 # for quits:
 #  /format $mode{channick $0} {chanhost $1} has quit {reason $2}
 
-$VERSION = "0.2";
+# Copyright (C) 2003-2007  Wouter Coekaerts <coekie@irssi.org>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+
+use strict;
+use Irssi 20021028;
+use vars qw($VERSION %IRSSI);
+
+$VERSION = "0.3";
 %IRSSI = (
 	authors         => "Wouter Coekaets",
 	contact         => "wouter\@coekaerts.be",
 	name            => "showmode",
 	description     => "show modes in parts, quits, kicks, topic changes or actions, like show_nickmode does for public messages",
-	license         => "GPL",
-	changed         => "2003-08-30"
+	license         => "GPLv2 or later",
+	changed         => "2007-07-28"
 );
 
 my @lastmode;
@@ -59,6 +77,7 @@ Irssi::signal_add_first('message quit', sub {setlast(0,$_[0],undef,$_[1]);});
 Irssi::signal_add_first('message topic', sub {setlast(0,$_[0],$_[1],$_[2]);});
 Irssi::signal_add_first('message kick', sub {setlast(0,$_[0],$_[1],$_[2]); setlast(1,$_[0],$_[1],$_[3]);});
 Irssi::signal_add_first('message irc action', sub {setlast(0,$_[0],$_[4],$_[2]);});
+Irssi::signal_add_first('message irc own_action', sub {setlast(0,$_[0],$_[2],$_[0]->{nick});});
 
 Irssi::expando_create('mode', sub {expando_mode($_[0],$_[1],0)},{ 'message part' => 'None'});
 Irssi::expando_create('mode2', sub {expando_mode($_[0],$_[1],1)},{ 'message part' => 'None'});
