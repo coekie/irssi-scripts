@@ -11,7 +11,7 @@ use Irssi;
 use strict;
 use Text::ParseWords;
 use vars qw($VERSION %IRSSI); 
-$VERSION = "2.0";
+$VERSION = "2.1";
 %IRSSI = (
 	authors	    => "Timo \'cras\' Sirainen, Wouter Coekaerts",
 	contact	    => "tss\@iki.fi, wouter\@coekaerts.be", 
@@ -19,7 +19,7 @@ $VERSION = "2.0";
 	description => "/GREP [-i] [-w] [-v] [-F] <perl-regexp> <command to run>",
 	license     => "Public Domain",
 	url         => "http://wouter.coekaerts.be/irssi/",
-	changed	    => "2003-08-20"
+	changed	    => "2008-01-13"
 );
 
 my ($match, $v);
@@ -30,7 +30,7 @@ sub sig_text {
 }
 
 sub cmd_grep {
-	my ($data,$server,$win) = @_;
+	my ($data,$server,$item) = @_;
 	my ($option,$cmd,$i,$w,$F);
 	$v = 0;
 	$F = 0;
@@ -75,7 +75,7 @@ sub cmd_grep {
 	}
 
 	Irssi::signal_add_first('print text', 'sig_text');
-	Irssi::command($cmd);
+	Irssi::signal_emit('send command', $cmd, $server, $item);
 	Irssi::signal_remove('print text', 'sig_text');
 }
 
