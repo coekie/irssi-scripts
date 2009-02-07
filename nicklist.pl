@@ -30,7 +30,7 @@ $VERSION = '0.4.6+';
 	description => 'draws a nicklist to another terminal, or at the right of your irssi in the same terminal',
 	license     => 'GPLv2+',
 	url         => 'http://wouter.coekaerts.be/irssi',
-	changed     => '05/05/2007'
+	changed     => '$LastChangedDate$'
 );
 
 sub cmd_help {
@@ -645,7 +645,7 @@ sub cmd_scroll {
 	my @nicks=Irssi::active_win->{active}->nicks;
 	my $nick_count = scalar(@nicks)+0;
 	my $channel = Irssi::active_win->{active};
-	if (!$channel || $channel->{type} ne 'CHANNEL' || !$channel->{names_got} || $nick_count <= Irssi::settings_get_int('nicklist_height')) {
+	if (!$channel || $channel->{type} ne 'CHANNEL' || !$channel->{names_got} || $nick_count <= $height) {
 		return;
 	}
 	$scroll_pos += @_[0];
