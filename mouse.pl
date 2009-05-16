@@ -18,7 +18,7 @@ $VERSION = '0.1.0';
 );
 
 my $mouse_xterm_status = -1; # -1:off 0,1,2:filling mouse_xterm_combo
-my @mouse_xterm_combo; # 0:button 1:x 2:y
+my @mouse_xterm_combo = (3, 0, 0); # 0:button 1:x 2:y
 my @mouse_xterm_previous; # previous contents of mouse_xterm_combo
 
 sub mouse_enable {
@@ -93,7 +93,7 @@ sub cmd
 signal_add_first("gui key pressed", sub {
 	my ($key) = @_;
 	if ($mouse_xterm_status != -1) {
-		if ($mouse_xterm_status == 0) {
+		if ($mouse_xterm_status == 0 && ($mouse_xterm_previous[0] != $mouse_xterm_combo[0])) { # if combo is starting, and previous what not a move (button not changed)
 			@mouse_xterm_previous = @mouse_xterm_combo;
 		}
 		$mouse_xterm_combo[$mouse_xterm_status] = $key-32;
