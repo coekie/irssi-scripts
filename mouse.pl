@@ -23,7 +23,7 @@ use Math::Trig;
 
 use vars qw($VERSION %IRSSI);
 
-$VERSION = '0.1.0';
+$VERSION = '1.0.0';
 %IRSSI = (
 	authors  	=> 'Wouter Coekaerts',
 	contact  	=> 'wouter@coekaerts.be',
