@@ -1,6 +1,4 @@
 # based on irssi mouse patch by mirage: http://darksun.com.pt/mirage/irssi/
-# It should probably indeed be done in C, and go into irssi, or as a module,
-#  but I translated it to perl just for the fun of it, and to prove it's possible maybe
 
 use strict;
 use Irssi qw(signal_emit settings_get_str active_win signal_stop settings_add_str settings_add_bool settings_get_bool signal_add signal_add_first);
@@ -8,7 +6,7 @@ use Math::Trig;
 
 use vars qw($VERSION %IRSSI);
 
-$VERSION = '0.0.0';
+$VERSION = '0.1.0';
 %IRSSI = (
 	authors  	=> 'Wouter Coekaerts',
 	contact  	=> 'wouter@coekaerts.be',
@@ -16,20 +14,27 @@ $VERSION = '0.0.0';
 	description 	=> 'experimental perl version of the irssi mouse patch',
 	license 	=> 'GPLv2',
 	url     	=> 'http://wouter.coekaerts.be/irssi/',
-	changed  	=> '2005-04-26',
+	changed  	=> '2009-05-16',
 );
 
 my $mouse_xterm_status = -1; # -1:off 0,1,2:filling mouse_xterm_combo
 my @mouse_xterm_combo; # 0:button 1:x 2:y
 my @mouse_xterm_previous; # previous contents of mouse_xterm_combo
 
+sub mouse_enable {
+	print STDERR "\e[?1000h"; # start tracking 
+}
+
+sub mouse_disable {
+	print STDERR "\e[?1000l"; # stop tracking 
+	Irssi::timeout_add_once(2000, 'mouse_enable', undef); # turn back on after 2 sec
+}
+
 # Handle mouse event (button press or release)
 sub mouse_event {
 	my ($b, $x, $y, $oldb, $oldx, $oldy) = @_;
 	my ($xd, $yd);
 	my ($distance, $angle);
-
-	#print "DEBUG: mouse_event $b $x $y";
 
 	# uhm, in the patch the scrollwheel didn't work for me, but this does:
 	if ($b == 64) {
@@ -41,15 +46,16 @@ sub mouse_event {
 	# proceed only if a button is being released
 	return if ($b != 3);
 
-#	# if it was a mouse click (press and release in the same position)
-#	if ($x == $oldx && $y == $oldy) {
-#		#signal_emit("mouse click", $oldb, $x, $y);
-#		mouse_click($oldb, $x, $y);
-#		return;
-#	}
+	# if it was a mouse click of the left button (press and release in the same position)
+	if ($x == $oldx && $y == $oldy && $oldb == 0) {
+		#signal_emit("mouse click", $oldb, $x, $y);
+		#mouse_click($oldb, $x, $y);
+		mouse_disable();
+		return;
+	}
 
-	# otherwise, find mouse gestures on left button
-	return if ($oldb != 0);
+	# otherwise, find mouse gestures on button
+	return if ($oldb != 2);
 	$xd = $x - $oldx;
 	$yd = -1 * ($y - $oldy);
 	$distance = sqrt($xd*$xd + $yd*$yd);
