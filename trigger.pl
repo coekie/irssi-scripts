@@ -1,7 +1,7 @@
 # trigger.pl - execute a command or replace text, triggered by an event in irssi
 # Do /TRIGGER HELP or look at http://wouter.coekaerts.be/irssi/ for help
 
-# Copyright (C) 2002-2006  Wouter Coekaerts <wouter@coekaerts.be>
+# Copyright (C) 2002-2010  Wouter Coekaerts <wouter@coekaerts.be>
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -31,7 +31,7 @@ $VERSION = '1.0+';
 	description => 'execute a command or replace text, triggered by an event in irssi',
 	license     => 'GPLv2 or later',
 	url         => 'http://wouter.coekaerts.be/irssi/',
-	changed     => '$LastChangedDate$',
+	changed     => '$LastChangedDate: 2009-02-07 21:35:47 +0100 (Sat, 07 Feb 2009) $',
 );
 
 sub cmd_help {
@@ -67,6 +67,7 @@ TRIGGER ADD ...
 
 %UFilters (conditions) the event has to satisfy%U 
 They all take one parameter. If you can give a list, seperate elements by space and use quotes around the list.
+All filters except for -pattern and -regexp can also be inversed by prefixing with -not_.
      -pattern: %|The message must match the given pattern. ? and * can be used as wildcards
      -regexp: %|The message must match the given regexp. (see man perlre)
        %|if -nocase is given as an option, the regexp or pattern is matched case insensitive
@@ -552,8 +553,10 @@ sub hasmode {
 my @trigger_switches = (@trigger_types, qw(all nocase stop once debug disabled));
 # parameters (with an argument)
 my @trigger_params = qw(pattern regexp command replace name);
+# all options that can be used to set filters, including negative matches (not_<filter>)
+my @trigger_filter_options = map(($_,'not_'.$_), keys(%filters));
 # list of all options (including switches) for /TRIGGER ADD
-my @trigger_add_options = (@trigger_switches, @trigger_params, keys(%filters));
+my @trigger_add_options = (@trigger_switches, @trigger_params, @trigger_filter_options);
 # same for /TRIGGER CHANGE, this includes the -no<option>'s
 my @trigger_options = map(($_,'no'.$_) ,@trigger_add_options);
 
@@ -577,9 +580,10 @@ sub check_signal_message {
 TRIGGER:	
 	foreach my $trigger (@{$triggers_by_type{$condition}}) {
 		# check filters
-		foreach my $trigfilter (@{$trigger->{'filters'}}) {
-			if (! ($trigfilter->[2]($trigfilter->[1], $signal,$parammessage,$server,$channelname,$nickname,$address,$condition,$extra))) {
-			
+		foreach my $trigfilter (filters_for_trigger($trigger)) {
+			my $filter_sub = $trigfilter->{'filter'}->{'sub'};
+			my $filter_matches = !!(&$filter_sub($trigfilter->{'param'}, $signal, $parammessage, $server, $channelname, $nickname, $address, $condition, $extra));
+			if ($filter_matches != $trigfilter->{'must_match'}) { # if it didn't match, or if it's a -not_* filter and it did match
 				next TRIGGER;
 			}
 		}
@@ -657,6 +661,12 @@ TRIGGER:
 		signal_continue(@$signal);
 	}
 	$recursion_depth--;
+}
+
+# return array of filters for the given trigger
+sub filters_for_trigger($) {
+	my ($trigger) = @_;
+	return values(%{$trigger->{'filters'}});
 }
 
 # used in check_signal_message to expand $'s
@@ -802,8 +812,8 @@ sub rebuild {
 ALLTYPES:
 				foreach my $type (@all_types) {
 					# check if all filters can apply to $type
-					foreach my $filter (@{$trigger->{'filters'}}) {
-						if (! grep {$_ eq $type} @{$filters{$filter->[0]}->{'types'}}) {
+					foreach my $trigfilter (filters_for_trigger($trigger)) {
+						if (! grep {$_ eq $type} @{$trigfilter->{'filter'}->{'types'}}) {
 							next ALLTYPES;
 						}
 					}
@@ -985,8 +995,8 @@ sub to_string {
 			}
 		}
 	} else {
-		foreach my $trigfilter (@{$trigger->{'filters'}}) {
-			$string .= '-' . $trigfilter->[0] . param_to_string($trigfilter->[1]);
+		foreach my $trigfilter (filters_for_trigger($trigger)) {
+			$string .= '-' . $trigfilter->{'option'} . param_to_string($trigfilter->{'param'});
 		}
 	}
 
@@ -1100,17 +1110,22 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 			}
 		}
 		
-		# -<filter> <value>
-		if ($filters{$option}) {
-			push @{$trigger->{'filters'}}, [$option, shift @args, $filters{$option}->{'sub'}];
+		# -[not_]<filter> <value>
+		if ($option =~ /^(not_)?(.*)$/ && $filters{$2}) {
+			$trigger->{'filters'}->{$option} = {
+				option => $option,
+				must_match => ($1 ne 'not_'), # if false, trigger must only be done if filter sub returns false
+				filter_name => $2,
+				filter => $filters{$2},
+				param => shift @args
+			};
+			
 			next ARGS;
 		}
 		
-		# -<nofilter>
+		# -no<filter>
 		if ($option =~ /^no(.*)$/ && $filters{$1}) {
-			my $filter = $1;
-			# the new filters are the old grepped for everything except ones with name $filter
-			@{$trigger->{'filters'}} = grep( $_->[0] ne $filter, @{$trigger->{'filters'}} );
+			delete $trigger->{'filters'}->{$option};
 		}
 	}
 	
@@ -1134,9 +1149,9 @@ ARGS:	for (my $arg = shift @args; $arg; $arg = shift @args) {
 	# remove types for which the filters don't apply
 	foreach my $type (@trigger_types) {
 		if ($trigger->{$type}) {
-			foreach my $filter (@{$trigger->{'filters'}}) {
-				if (!grep {$_ eq $type} @{$filters{$filter->[0]}->{'types'}}) {
-					Irssi::print("Warning: the filter -" . $filter->[0] . " can't apply to an event of type -$type, so I'm removing that type from this trigger.");
+			foreach my $trigfilter (filters_for_trigger($trigger)) {
+				if (!grep {$_ eq $type} @{$trigfilter->{'filter'}->{'types'}}) {
+					Irssi::print("Warning: the filter -" . $trigfilter->{'option'} . " can't apply to an event of type -$type, so I'm removing that type from this trigger.");
 					delete $trigger->{$type};
 				}
 			}
